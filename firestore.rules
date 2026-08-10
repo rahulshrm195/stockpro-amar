@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// StockPro security rules
+// Roles: admin (Rahul) and manager (e.g. Ajay).
+// Cost data is a SEPARATE collection (itemCosts) readable only by admin,
+// so "no cost data for manager" is enforced by the database, not just the UI.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function myUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myRole() {
+      return isSignedIn() ? myUser().role : null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && myRole() == 'admin';
+    }
+
+    function isManager() {
+      return isSignedIn() && myRole() == 'manager';
+    }
+
+    function isStaff() {
+      return isAdmin() || isManager();
+    }
+
+    // Bootstrap: the very first admin account creates its own user doc.
+    // Replace the email below if your Firebase Auth login email differs.
+    function isBootstrapAdmin() {
+      return isSignedIn()
+        && request.auth.token.email == 'rahulshrm195@gmail.com'
+        && request.resource.data.role == 'admin';
+    }
+
+    match /users/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if isAdmin() || (request.auth.uid == uid && isBootstrapAdmin());
+      allow update, delete: if isAdmin();
+    }
+
+    // Item master data — name/category/unit/reorderLevel are staff-readable.
+    // Manager may ONLY ever touch currentStock/updatedAt (as a side effect of
+    // logging a movement) — never create, delete, or edit master fields.
+    match /items/{itemId} {
+      allow read: if isStaff();
+      allow create: if isAdmin();
+      allow update: if isAdmin()
+        || (isManager() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentStock', 'updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    // Cost data lives here, separate from /items, so a manager's read of an
+    // item can never expose costPerUnit — the collection itself is admin-only.
+    match /itemCosts/{itemId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Movements are an immutable audit trail — no updates or deletes by anyone.
+    // Admin can read all; manager can only read movements they created.
+    match /movements/{movementId} {
+      allow read: if isAdmin() || (isManager() && resource.data.createdBy == request.auth.uid);
+      allow create: if isStaff() && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // Lightweight autocomplete list of project names.
+    match /projects/{projectId} {
+      allow read: if isStaff();
+      allow create: if isStaff();
+      allow update, delete: if isAdmin();
+    }
+  }
+}

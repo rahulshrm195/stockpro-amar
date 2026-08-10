@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>StockPro — Amar Furniture</title>
+<meta name="description" content="Daily stock management for hardware, consumables and shop-floor supplies">
+<meta name="theme-color" content="#15171A">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#15171A; --bg-elev:#1C1F24; --card:#20242A; --card-hover:#262B32; --border:#2C3038;
+    --text:#EDEEF0; --text-dim:#9AA0AA; --text-faint:#6B7280;
+    --brass:#C9932E; --brass-dim:#9C6F1C; --brass-soft:rgba(201,147,46,0.14); --brass-text:#E4B65B;
+    --green:#3FB27F; --green-soft:rgba(63,178,127,0.14);
+    --rust:#C1543A; --rust-soft:rgba(193,84,58,0.16);
+    --blue:#4C8DD9; --blue-soft:rgba(76,141,217,0.14);
+    --radius:10px; --radius-lg:16px;
+    --font-ui:'Inter',system-ui,-apple-system,sans-serif; --font-mono:'Space Mono',ui-monospace,monospace;
+    --shadow:0 8px 30px rgba(0,0,0,0.45);
+    --sidebar-w:224px;
+  }
+  html[data-theme="light"]{
+    --bg:#F5F5F2; --bg-elev:#FFFFFF; --card:#FFFFFF; --card-hover:#F1F1EE; --border:#E3E3DE;
+    --text:#181A1D; --text-dim:#5B6068; --text-faint:#8A8F97;
+    --brass-soft:rgba(201,147,46,0.12); --brass-text:#9C6F1C;
+    --shadow:0 8px 30px rgba(20,20,15,0.10);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-ui);-webkit-font-smoothing:antialiased;}
+  ::selection{background:var(--brass-soft);}
+  a{color:inherit;}
+  button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit;}
+  input,select,textarea{background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;width:100%;outline:none;transition:border-color .15s;}
+  input:focus,select:focus,textarea:focus{border-color:var(--brass);}
+  label{display:block;font-size:12.5px;color:var(--text-dim);margin-bottom:6px;font-weight:500;}
+  .field{margin-bottom:14px;}
+  .mono{font-family:var(--font-mono);}
+  button{cursor:pointer;border:none;border-radius:var(--radius);font-weight:600;}
+  button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--brass);outline-offset:2px;}
+  .btn{padding:10px 16px;background:var(--card);border:1px solid var(--border);color:var(--text);}
+  .btn:hover{background:var(--card-hover);}
+  .btn-primary{background:var(--brass);color:#1A1300;}
+  .btn-primary:hover{background:var(--brass-text);}
+  .btn-danger{background:transparent;color:var(--rust);border:1px solid var(--rust);}
+  .btn-danger:hover{background:var(--rust-soft);}
+  .btn-ghost{background:transparent;border:1px solid transparent;}
+  .btn-ghost:hover{background:var(--card);}
+  .btn-block{width:100%;}
+  .btn-sm{padding:6px 10px;font-size:13px;}
+
+  /* ---------- Login ---------- */
+  #login-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .login-card{width:100%;max-width:380px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:32px;box-shadow:var(--shadow);}
+  .login-mark{width:52px;height:52px;margin-bottom:18px;}
+  .login-card h1{font-size:20px;margin:0 0 4px;}
+  .login-card p.sub{color:var(--text-dim);font-size:13.5px;margin:0 0 24px;}
+  .login-error{background:var(--rust-soft);color:var(--rust);padding:10px 12px;border-radius:var(--radius);font-size:13px;margin-bottom:14px;display:none;}
+
+  /* ---------- Shell ---------- */
+  #shell{display:none;min-height:100vh;}
+  #shell.active{display:flex;}
+  #sidebar{width:var(--sidebar-w);flex-shrink:0;background:var(--bg-elev);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;bottom:0;left:0;transform:translateX(0);transition:transform .2s;z-index:40;}
+  .brand{display:flex;align-items:center;gap:10px;padding:20px 18px 16px;}
+  .brand svg{width:28px;height:28px;flex-shrink:0;}
+  .brand-text{line-height:1.2;}
+  .brand-text b{font-size:15px;display:block;}
+  .brand-text span{font-size:11px;color:var(--text-faint);}
+  nav.nav{padding:8px 10px;display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:var(--radius);color:var(--text-dim);font-size:14px;font-weight:500;background:none;text-align:left;width:100%;}
+  .nav-item svg{width:17px;height:17px;flex-shrink:0;opacity:.85;}
+  .nav-item:hover{background:var(--card);color:var(--text);}
+  .nav-item.active{background:var(--brass-soft);color:var(--brass-text);}
+  .nav-item.active svg{opacity:1;}
+  .sidebar-foot{padding:12px 10px 16px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:4px;}
+  .user-chip{display:flex;align-items:center;gap:9px;padding:8px 10px;font-size:12.5px;color:var(--text-dim);}
+  .user-dot{width:26px;height:26px;border-radius:50%;background:var(--brass-soft);color:var(--brass-text);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;flex-shrink:0;}
+
+  #main{margin-left:var(--sidebar-w);flex:1;min-width:0;display:flex;flex-direction:column;min-height:100vh;}
+  #topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:20;}
+  #topbar h2{font-size:18px;margin:0;}
+  .topbar-right{display:flex;align-items:center;gap:10px;}
+  #menu-btn{display:none;background:none;border:none;padding:6px;}
+  #menu-btn svg{width:22px;height:22px;}
+  #view{padding:24px;flex:1;}
+  #overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:30;}
+
+  /* ---------- Cards / grid ---------- */
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:22px;}
+  .stat-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px;}
+  .stat-card .label{font-size:12px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;}
+  .stat-card .value{font-family:var(--font-mono);font-size:26px;font-weight:700;}
+  .stat-card .value.warn{color:var(--rust);}
+  .stat-card .value.ok{color:var(--green);}
+  .stat-card .value.brass{color:var(--brass-text);}
+
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px;}
+  .panel-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:10px;flex-wrap:wrap;}
+  .panel-head h3{margin:0;font-size:15px;}
+
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{text-align:left;color:var(--text-faint);font-weight:600;font-size:11.5px;text-transform:uppercase;letter-spacing:.03em;padding:8px 10px;border-bottom:1px solid var(--border);}
+  td{padding:10px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+  tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:var(--card-hover);}
+  .num{font-family:var(--font-mono);}
+  .empty-row td{color:var(--text-faint);text-align:center;padding:30px 10px;}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:100px;font-size:11.5px;font-weight:700;letter-spacing:.02em;}
+  .badge-in{background:var(--green-soft);color:var(--green);}
+  .badge-out{background:var(--rust-soft);color:var(--rust);}
+  .badge-low{background:var(--rust-soft);color:var(--rust);}
+  .badge-role{background:var(--blue-soft);color:var(--blue);}
+
+  .stockbar{width:70px;height:5px;border-radius:4px;background:var(--border);overflow:hidden;display:inline-block;vertical-align:middle;margin-left:8px;}
+  .stockbar > i{display:block;height:100%;background:var(--green);}
+  .stockbar.low > i{background:var(--rust);}
+
+  form.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;}
+  form.grid2 .full{grid-column:1/-1;}
+
+  /* ---------- Modal ---------- */
+  .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:100;align-items:center;justify-content:center;padding:16px;}
+  .modal-backdrop.active{display:flex;}
+  .modal{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);width:100%;max-width:440px;max-height:88vh;overflow-y:auto;padding:24px;box-shadow:var(--shadow);}
+  .modal h3{margin:0 0 18px;font-size:16px;}
+  .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px;}
+
+  /* ---------- Toast ---------- */
+  #toast-wrap{position:fixed;bottom:18px;right:18px;z-index:200;display:flex;flex-direction:column;gap:8px;}
+  .toast{background:var(--card);border:1px solid var(--border);border-left:3px solid var(--brass);color:var(--text);padding:11px 16px;border-radius:var(--radius);font-size:13.5px;box-shadow:var(--shadow);min-width:220px;animation:toastin .15s ease-out;}
+  .toast.err{border-left-color:var(--rust);}
+  .toast.ok{border-left-color:var(--green);}
+  @keyframes toastin{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .search-input{max-width:260px;}
+  .muted{color:var(--text-dim);}
+  .faint{color:var(--text-faint);font-size:12.5px;}
+  .hidden{display:none !important;}
+
+  @media (max-width: 900px){
+    :root{--sidebar-w:224px;}
+    #sidebar{transform:translateX(-100%);}
+    #sidebar.open{transform:translateX(0);}
+    #main{margin-left:0;}
+    #menu-btn{display:flex;align-items:center;}
+    #overlay.active{display:block;}
+    form.grid2{grid-template-columns:1fr;}
+    #view{padding:16px;}
+    #topbar{padding:12px 16px;}
+  }
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none !important;transition:none !important;}
+  }
+</style>
+</head>
+<body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <svg class="login-mark" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#C9932E"/>
+      <circle cx="50" cy="50" r="24" fill="#15171A"/>
+      <circle cx="50" cy="50" r="17" fill="#9C6F1C"/>
+    </svg>
+    <h1>StockPro</h1>
+    <p class="sub">Amar Furniture — stock &amp; consumables</p>
+    <div class="login-error" id="login-error"></div>
+    <form id="login-form">
+      <div class="field">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="login-pass">Password</label>
+        <input type="password" id="login-pass" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-block" id="login-submit">Sign in</button>
+    </form>
+  </div>
+</div>
+
+<div id="shell">
+  <div id="overlay" data-action="close-sidebar"></div>
+  <aside id="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><polygon points="50,4 90,27 90,73 50,96 10,73 10,27" fill="#C9932E"/><circle cx="50" cy="50" r="24" fill="#15171A"/><circle cx="50" cy="50" r="17" fill="#9C6F1C"/></svg>
+      <div class="brand-text"><b>StockPro</b><span id="app-version-tag">v1.0.0</span></div>
+    </div>
+    <nav class="nav" id="nav-list"></nav>
+    <div class="sidebar-foot">
+      <button class="nav-item" data-action="toggle-theme" id="theme-toggle-btn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span id="theme-toggle-label">Light mode</span>
+      </button>
+      <button class="nav-item" id="install-btn" style="display:none;" data-action="install-app">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        <span>Install app</span>
+      </button>
+      <div class="user-chip">
+        <div class="user-dot" id="user-initial">A</div>
+        <div style="overflow:hidden;">
+          <div id="user-email" style="color:var(--text);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+          <div id="user-role" class="faint"></div>
+        </div>
+      </div>
+      <button class="nav-item" data-action="logout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        <span>Log out</span>
+      </button>
+    </div>
+  </aside>
+
+  <div id="main">
+    <div id="topbar">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button id="menu-btn" data-action="open-sidebar" aria-label="Menu">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+        </button>
+        <h2 id="view-title">Dashboard</h2>
+      </div>
+      <div class="topbar-right" id="topbar-actions"></div>
+    </div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal-body"></div>
+</div>
+
+<div id="toast-wrap"></div>
+
+<script type="module">
+import { initializeApp, deleteApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut,
+  createUserWithEmailAndPassword
+} from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+import {
+  initializeFirestore, persistentLocalCache, persistentSingleTabManager,
+  doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc,
+  collection, query, where, orderBy, limit, onSnapshot, getDocs,
+  writeBatch, increment, serverTimestamp, Timestamp
+} from "https://www.gstatic.com/firebasejs/12.17.1/firebase-firestore.js";
+
+/* ======================= CONFIG ======================= */
+const APP_VERSION = "1.0.0";
+const CHANGELOG = [
+  { version: "1.0.0", date: "2026-08-10", notes: [
+    "Initial release: items master, receive & issue, dashboard, low-stock alerts",
+    "Project tracking on movements (optional)",
+    "Admin & Manager roles — manager has no access to cost/₹ data",
+    "Offline support — works and queues writes without a connection",
+    "Installable on desktop and mobile"
+  ]}
+];
+const BOOTSTRAP_ADMIN_EMAIL = "rahulshrm195@gmail.com"; // first login with this email becomes admin
+
+const firebaseConfig = {
+  apiKey: "AIzaSyARVv1P0ssuKzfpS1M59AB-rG3riIWh-2c",
+  authDomain: "amar-furniture-e4782.firebaseapp.com",
+  projectId: "amar-furniture-e4782",
+  storageBucket: "amar-furniture-e4782.firebasestorage.app",
+  messagingSenderId: "1084205045390",
+  appId: "1:1084205045390:web:0a41c4f774d08d819c5bdf"
+};
+
+const UNIT_SUGGESTIONS = ["kg","g","pieces","box","sheet","meter","litre","roll","packet"];
+const CATEGORY_SUGGESTIONS = ["Nails","Screws","Grinder / Sandpaper","Glue & Adhesives","Polish & Finish","Fittings & Hardware","Tools","Electrical","Other"];
+
+/* ======================= FIREBASE INIT ======================= */
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() })
+});
+
+/* ======================= STATE ======================= */
+let currentUser = null;
+let currentRole = null;   // 'admin' | 'manager'
+let currentName = "";
+let itemsCache = [];      // [{id,name,category,unit,currentStock,reorderLevel,active}]
+let itemsById = {};
+let costsCache = {};      // itemId -> costPerUnit (admin only)
+let projectsCache = [];   // [name,...]
+let usersCache = [];      // admin only
+let liveUnsubs = [];
+let deferredInstallPrompt = null;
+
+const INR = new Intl.NumberFormat("en-IN", { style:"currency", currency:"INR", maximumFractionDigits:0 });
+const fmtNum = (n) => new Intl.NumberFormat("en-IN", { maximumFractionDigits:2 }).format(n || 0);
+const fmtDate = (ts) => {
+  if (!ts) return "—";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  return d.toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) + " " +
+         d.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" });
+};
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+
+const NAV_ITEMS = [
+  { id:"dashboard", label:"Dashboard", roles:["admin","manager"], icon:'<path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>' },
+  { id:"receive",   label:"Receive",   roles:["admin","manager"], icon:'<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>' },
+  { id:"issue",     label:"Issue",     roles:["admin","manager"], icon:'<path d="M12 21V9m0 0l-4 4m4-4l4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2"/>' },
+  { id:"items",     label:"Items",     roles:["admin"], icon:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' },
+  { id:"ledger",    label:"Ledger",    roles:["admin"], icon:'<path d="M4 6h16M4 12h16M4 18h10"/>' },
+  { id:"reports",   label:"Reports",   roles:["admin"], icon:'<path d="M3 3v18h18M8 17V10M13 17V6M18 17v-4"/>' },
+  { id:"users",     label:"Users",     roles:["admin"], icon:'<path d="M17 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>' }
+];
+
+/* ======================= TOAST ======================= */
+function toast(msg, type="") {
+  const wrap = document.getElementById("toast-wrap");
+  const el = document.createElement("div");
+  el.className = "toast" + (type ? " " + type : "");
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+
+/* ======================= AUTH ======================= */
+document.getElementById("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = document.getElementById("login-email").value.trim();
+  const pass = document.getElementById("login-pass").value;
+  const errBox = document.getElementById("login-error");
+  const btn = document.getElementById("login-submit");
+  errBox.style.display = "none";
+  btn.textContent = "Signing in…";
+  btn.disabled = true;
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+  } catch (err) {
+    errBox.textContent = friendlyAuthError(err);
+    errBox.style.display = "block";
+  } finally {
+    btn.textContent = "Sign in";
+    btn.disabled = false;
+  }
+});
+
+function friendlyAuthError(err) {
+  const c = err && err.code || "";
+  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Incorrect email or password.";
+  if (c.includes("too-many-requests")) return "Too many attempts. Please wait and try again.";
+  if (c.includes("network-request-failed")) return "No connection — check your internet and try again.";
+  return "Couldn't sign in. Please try again.";
+}
+
+onAuthStateChanged(auth, async (user) => {
+  cleanupListeners();
+  if (!user) {
+    document.getElementById("login-screen").style.display = "flex";
+    document.getElementById("shell").classList.remove("active");
+    currentUser = null; currentRole = null;
+    return;
+  }
+  currentUser = user;
+  try {
+    const uRef = doc(db, "users", user.uid);
+    let uSnap = await getDoc(uRef);
+    if (!uSnap.exists()) {
+      if ((user.email || "").toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase()) {
+        await setDoc(uRef, {
+          email: user.email, name: user.email.split("@")[0],
+          role: "admin", createdAt: serverTimestamp()
+        });
+        uSnap = await getDoc(uRef);
+      } else {
+        toast("Your account isn't set up yet. Ask the admin to add you.", "err");
+        await signOut(auth);
+        return;
+      }
+    }
+    currentRole = uSnap.data().role;
+    currentName = uSnap.data().name || user.email;
+  } catch (err) {
+    toast("Couldn't load your account. Check your connection.", "err");
+    await signOut(auth);
+    return;
+  }
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("shell").classList.add("active");
+  bootApp();
+});
+
+/* ======================= APP BOOT ======================= */
+function cleanupListeners() {
+  liveUnsubs.forEach((u) => { try { u(); } catch (e) {} });
+  liveUnsubs = [];
+}
+
+function bootApp() {
+  document.getElementById("user-email").textContent = currentUser.email;
+  document.getElementById("user-role").textContent = currentRole === "admin" ? "Admin" : "Manager";
+  document.getElementById("user-initial").textContent = (currentName || currentUser.email || "?").charAt(0).toUpperCase();
+  document.getElementById("app-version-tag").textContent = "v" + APP_VERSION;
+  renderNav();
+  attachLiveListeners();
+  if (!location.hash) location.hash = "#/dashboard";
+  route();
+  maybeShowWhatsNew();
+}
+
+function renderNav() {
+  const nav = document.getElementById("nav-list");
+  nav.innerHTML = NAV_ITEMS.filter((n) => n.roles.includes(currentRole)).map((n) => `
+    <button class="nav-item" data-action="nav" data-route="${n.id}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${n.icon}</svg>
+      <span>${n.label}</span>
+    </button>
+  `).join("");
+}
+
+function attachLiveListeners() {
+  const itemsQ = query(collection(db, "items"), orderBy("name"));
+  liveUnsubs.push(onSnapshot(itemsQ, (snap) => {
+    itemsCache = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((i) => i.active !== false);
+    itemsById = Object.fromEntries(itemsCache.map((i) => [i.id, i]));
+    route();
+  }, () => toast("Live item updates paused — showing last known data.", "err")));
+
+  const projQ = query(collection(db, "projects"), orderBy("name"));
+  liveUnsubs.push(onSnapshot(projQ, (snap) => {
+    projectsCache = snap.docs.map((d) => d.data().name);
+  }));
+
+  if (currentRole === "admin") {
+    const costQ = collection(db, "itemCosts");
+    liveUnsubs.push(onSnapshot(costQ, (snap) => {
+      costsCache = {};
+      snap.docs.forEach((d) => { costsCache[d.id] = d.data().costPerUnit || 0; });
+      route();
+    }));
+    const usersQ = collection(db, "users");
+    liveUnsubs.push(onSnapshot(usersQ, (snap) => {
+      usersCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      if (location.hash === "#/users") route();
+    }));
+  }
+}
+
+/* ======================= ROUTER ======================= */
+const ADMIN_ONLY_ROUTES = ["items","ledger","reports","users"];
+window.addEventListener("hashchange", route);
+
+function route() {
+  if (!currentUser) return;
+  const r = (location.hash.replace("#/", "") || "dashboard").split("?")[0];
+  if (ADMIN_ONLY_ROUTES.includes(r) && currentRole !== "admin") {
+    location.hash = "#/dashboard";
+    return;
+  }
+  document.querySelectorAll(".nav-item[data-route]").forEach((el) => {
+    el.classList.toggle("active", el.dataset.route === r);
+  });
+  const titles = { dashboard:"Dashboard", receive:"Receive stock", issue:"Issue stock", items:"Items", ledger:"Ledger", reports:"Reports", users:"Users" };
+  document.getElementById("view-title").textContent = titles[r] || "Dashboard";
+  document.getElementById("topbar-actions").innerHTML = topbarActionsFor(r);
+  const view = document.getElementById("view");
+  switch (r) {
+    case "dashboard": view.innerHTML = renderDashboard(); break;
+    case "receive": view.innerHTML = renderMoveForm("in"); break;
+    case "issue": view.innerHTML = renderMoveForm("out"); break;
+    case "items": view.innerHTML = renderItems(); break;
+    case "ledger": view.innerHTML = renderLedger(); break;
+    case "reports": view.innerHTML = renderReports(); break;
+    case "users": view.innerHTML = renderUsers(); break;
+    default: view.innerHTML = renderDashboard();
+  }
+  closeSidebar();
+  if (r === "ledger") loadLedger();
+  if (r === "reports") loadReports();
+  if (r === "dashboard") loadRecentActivity();
+}
+
+function topbarActionsFor(r) {
+  if (r === "items") return `<button class="btn btn-primary btn-sm" data-action="open-item-modal">+ Add item</button>`;
+  if (r === "users" && currentRole === "admin") return `<button class="btn btn-primary btn-sm" data-action="open-user-modal">+ Add manager</button>`;
+  if (r === "ledger") return `<button class="btn btn-sm" data-action="export-ledger">Export CSV</button>`;
+  return "";
+}
+
+/* ======================= DASHBOARD ======================= */
+function lowStockItems() {
+  return itemsCache.filter((i) => (i.currentStock ?? 0) <= (i.reorderLevel ?? 0));
+}
+
+function renderDashboard() {
+  const low = lowStockItems();
+  const totalItems = itemsCache.length;
+  let valueCard = "";
+  if (currentRole === "admin") {
+    const totalValue = itemsCache.reduce((s, i) => s + (i.currentStock || 0) * (costsCache[i.id] || 0), 0);
+    valueCard = `<div class="stat-card"><div class="label">Inventory value</div><div class="value brass">${INR.format(totalValue)}</div></div>`;
+  }
+  return `
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Total items</div><div class="value">${totalItems}</div></div>
+      <div class="stat-card"><div class="label">Low stock</div><div class="value ${low.length ? "warn" : "ok"}">${low.length}</div></div>
+      ${valueCard}
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Low stock</h3><span class="faint">at or below reorder level</span></div>
+      <table>
+        <thead><tr><th>Item</th><th>Category</th><th class="num">Stock</th><th class="num">Reorder at</th></tr></thead>
+        <tbody>
+          ${low.length ? low.map((i) => `
+            <tr>
+              <td>${esc(i.name)}</td>
+              <td class="muted">${esc(i.category || "—")}</td>
+              <td class="num">${fmtNum(i.currentStock)} ${esc(i.unit || "")} <span class="badge badge-low">low</span></td>
+              <td class="num muted">${fmtNum(i.reorderLevel)} ${esc(i.unit || "")}</td>
+            </tr>`).join("") : `<tr class="empty-row"><td colspan="4">Nothing below reorder level right now.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>${currentRole === "admin" ? "Recent activity" : "Your recent activity"}</h3></div>
+      <table>
+        <thead><tr><th>Item</th><th>Type</th><th class="num">Qty</th><th>Project</th><th>When</th></tr></thead>
+        <tbody id="recent-activity-body"><tr class="empty-row"><td colspan="5">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function loadRecentActivity() {
+  const body = document.getElementById("recent-activity-body");
+  if (!body) return;
+  try {
+    let mQ;
+    if (currentRole === "admin") {
+      mQ = query(collection(db, "movements"), orderBy("createdAt", "desc"), limit(12));
+    } else {
+      mQ = query(collection(db, "movements"), where("createdBy", "==", currentUser.uid), orderBy("createdAt", "desc"), limit(12));
+    }
+    const snap = await getDocs(mQ);
+    if (snap.empty) {
+      body.innerHTML = `<tr class="empty-row"><td colspan="5">No activity yet — log a receive or issue to get started.</td></tr>`;
+      return;
+    }
+    body.innerHTML = snap.docs.map((d) => movementRow(d.data())).join("");
+  } catch (err) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="5">Couldn't load activity — check your connection.</td></tr>`;
+  }
+}
+
+function movementRow(m) {
+  const badge = m.type === "in" ? `<span class="badge badge-in">IN</span>` : `<span class="badge badge-out">OUT</span>`;
+  const who = m.type === "out" ? (m.issuedTo ? " → " + esc(m.issuedTo) : "") : (m.receivedFrom ? " ← " + esc(m.receivedFrom) : "");
+  return `<tr>
+    <td>${esc(m.itemName)}</td>
+    <td>${badge}</td>
+    <td class="num">${fmtNum(m.qty)} ${esc(m.unit || "")}</td>
+    <td class="muted">${esc(m.project || "—")}${who}</td>
+    <td class="faint">${fmtDate(m.createdAt)}</td>
+  </tr>`;
+}
+
+/* ======================= RECEIVE / ISSUE ======================= */
+function renderMoveForm(type) {
+  const isIn = type === "in";
+  const activeItems = itemsCache;
+  return `
+    <div class="panel" style="max-width:560px;">
+      <form id="move-form" data-type="${type}">
+        <div class="field">
+          <label for="mv-item">Item</label>
+          <select id="mv-item" required>
+            <option value="">Select an item…</option>
+            ${activeItems.map((i) => `<option value="${i.id}" data-unit="${esc(i.unit || "")}" data-stock="${i.currentStock || 0}">${esc(i.name)} (${fmtNum(i.currentStock)} ${esc(i.unit || "")} in stock)</option>`).join("")}
+          </select>
+          ${activeItems.length === 0 ? `<div class="faint" style="margin-top:6px;">No items yet.${currentRole === "admin" ? ' Add one under "Items" first.' : " Ask the admin to add items first."}</div>` : ""}
+        </div>
+        <div class="field">
+          <label for="mv-qty">Quantity <span id="mv-unit-label" class="faint"></span></label>
+          <input type="number" id="mv-qty" min="0.01" step="0.01" required>
+        </div>
+        <div class="field">
+          <label for="mv-party">${isIn ? "Received from (optional)" : "Issued to (optional)"}</label>
+          <input type="text" id="mv-party" placeholder="${isIn ? "e.g. Nashik Hardware Mart" : "e.g. Suresh (karigar)"}">
+        </div>
+        <div class="field">
+          <label for="mv-project">Project (optional)</label>
+          <input type="text" id="mv-project" list="project-list" placeholder="Leave blank if not project-specific">
+          <datalist id="project-list">${projectsCache.map((p) => `<option value="${esc(p)}">`).join("")}</datalist>
+        </div>
+        <div class="field">
+          <label for="mv-note">Note (optional)</label>
+          <textarea id="mv-note" rows="2"></textarea>
+        </div>
+        <button type="submit" class="btn ${isIn ? "btn-primary" : "btn-primary"} btn-block" id="mv-submit">
+          ${isIn ? "Log receive" : "Log issue"}
+        </button>
+      </form>
+    </div>
+  `;
+}
+
+document.addEventListener("change", (e) => {
+  if (e.target && e.target.id === "mv-item") {
+    const opt = e.target.selectedOptions[0];
+    const unit = opt ? opt.dataset.unit : "";
+    const label = document.getElementById("mv-unit-label");
+    if (label) label.textContent = unit ? `(${unit})` : "";
+  }
+});
+
+async function handleMoveSubmit(form) {
+  const type = form.dataset.type;
+  const itemSel = document.getElementById("mv-item");
+  const itemId = itemSel.value;
+  const qty = parseFloat(document.getElementById("mv-qty").value);
+  const party = document.getElementById("mv-party").value.trim();
+  const project = document.getElementById("mv-project").value.trim();
+  const note = document.getElementById("mv-note").value.trim();
+  if (!itemId || !qty || qty <= 0) { toast("Choose an item and a valid quantity.", "err"); return; }
+  const item = itemsById[itemId];
+  if (!item) { toast("That item couldn't be found — refresh and try again.", "err"); return; }
+
+  if (type === "out") {
+    const known = item.currentStock || 0;
+    if (qty > known) {
+      const ok = confirm(`Only ${fmtNum(known)} ${item.unit || ""} of ${item.name} is on record. Issue ${fmtNum(qty)} anyway?`);
+      if (!ok) return;
+    }
+  }
+
+  const btn = document.getElementById("mv-submit");
+  btn.disabled = true; btn.textContent = "Saving…";
+  try {
+    const batch = writeBatch(db);
+    const mvRef = doc(collection(db, "movements"));
+    batch.set(mvRef, {
+      itemId, itemName: item.name, type, qty, unit: item.unit || "",
+      project: project || null,
+      issuedTo: type === "out" ? (party || null) : null,
+      receivedFrom: type === "in" ? (party || null) : null,
+      note: note || null,
+      createdBy: currentUser.uid, createdByName: currentName || currentUser.email,
+      createdAt: serverTimestamp()
+    });
+    const itemRef = doc(db, "items", itemId);
+    batch.update(itemRef, { currentStock: increment(type === "in" ? qty : -qty), updatedAt: serverTimestamp() });
+    if (project) {
+      const projRef = doc(db, "projects", slugify(project));
+      batch.set(projRef, { name: project }, { merge: true });
+    }
+    await batch.commit();
+    toast(type === "in" ? "Stock received and logged." : "Stock issued and logged.", "ok");
+    form.reset();
+    document.getElementById("mv-unit-label").textContent = "";
+  } catch (err) {
+    toast(navigator.onLine ? "Couldn't save — please try again." : "Saved offline — will sync once you're back online.", navigator.onLine ? "err" : "ok");
+    form.reset();
+  } finally {
+    btn.disabled = false; btn.textContent = type === "in" ? "Log receive" : "Log issue";
+  }
+}
+
+function slugify(s) {
+  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "") || ("p" + Date.now());
+}
+
+/* ======================= ITEMS (admin) ======================= */
+function renderItems() {
+  const rows = itemsCache.map((i) => {
+    const cost = costsCache[i.id] || 0;
+    const value = (i.currentStock || 0) * cost;
+    const low = (i.currentStock || 0) <= (i.reorderLevel || 0);
+    const pct = i.reorderLevel > 0 ? Math.min(100, ((i.currentStock || 0) / (i.reorderLevel * 2 || 1)) * 100) : 100;
+    return `<tr>
+      <td>${esc(i.name)}${low ? ' <span class="badge badge-low">low</span>' : ""}</td>
+      <td class="muted">${esc(i.category || "—")}</td>
+      <td class="num">${fmtNum(i.currentStock)} ${esc(i.unit || "")}<span class="stockbar ${low ? "low" : ""}"><i style="width:${pct}%"></i></span></td>
+      <td class="num muted">${fmtNum(i.reorderLevel)} ${esc(i.unit || "")}</td>
+      <td class="num">${INR.format(cost)}</td>
+      <td class="num">${INR.format(value)}</td>
+      <td>
+        <button class="btn btn-sm btn-ghost" data-action="edit-item" data-id="${i.id}">Edit</button>
+        <button class="btn btn-sm btn-danger" data-action="deactivate-item" data-id="${i.id}">Remove</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="panel">
+      <table>
+        <thead><tr><th>Item</th><th>Category</th><th class="num">Stock</th><th class="num">Reorder at</th><th class="num">Cost/unit</th><th class="num">Value</th><th></th></tr></thead>
+        <tbody>${rows || `<tr class="empty-row"><td colspan="7">No items yet — add your first one.</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function itemModalHtml(existing) {
+  const e = existing || {};
+  const cost = existing ? (costsCache[existing.id] || 0) : "";
+  return `
+    <h3>${existing ? "Edit item" : "Add item"}</h3>
+    <form id="item-form" data-id="${existing ? existing.id : ""}">
+      <div class="field"><label for="it-name">Name</label><input type="text" id="it-name" value="${esc(e.name || "")}" required></div>
+      <div class="field"><label for="it-category">Category</label><input type="text" id="it-category" list="cat-list" value="${esc(e.category || "")}"><datalist id="cat-list">${CATEGORY_SUGGESTIONS.map((c) => `<option value="${c}">`).join("")}</datalist></div>
+      <div class="field"><label for="it-unit">Unit</label><input type="text" id="it-unit" list="unit-list" value="${esc(e.unit || "")}" placeholder="kg, pieces, box…" required><datalist id="unit-list">${UNIT_SUGGESTIONS.map((u) => `<option value="${u}">`).join("")}</datalist></div>
+      <div class="field"><label for="it-reorder">Reorder level</label><input type="number" id="it-reorder" min="0" step="0.01" value="${e.reorderLevel ?? 0}"></div>
+      <div class="field"><label for="it-cost">Cost per unit (₹)</label><input type="number" id="it-cost" min="0" step="0.01" value="${cost}"></div>
+      ${!existing ? `<div class="field"><label for="it-stock">Opening stock</label><input type="number" id="it-stock" min="0" step="0.01" value="0"></div>` : ""}
+      <div class="modal-actions">
+        <button type="button" class="btn" data-action="close-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">${existing ? "Save changes" : "Add item"}</button>
+      </div>
+    </form>
+  `;
+}
+
+async function handleItemSubmit(form) {
+  const id = form.dataset.id;
+  const name = document.getElementById("it-name").value.trim();
+  const category = document.getElementById("it-category").value.trim();
+  const unit = document.getElementById("it-unit").value.trim();
+  const reorderLevel = parseFloat(document.getElementById("it-reorder").value) || 0;
+  const cost = parseFloat(document.getElementById("it-cost").value) || 0;
+  if (!name || !unit) { toast("Item name and unit are required.", "err"); return; }
+  try {
+    if (id) {
+      await updateDoc(doc(db, "items", id), { name, category, unit, reorderLevel, updatedAt: serverTimestamp() });
+      await setDoc(doc(db, "itemCosts", id), { costPerUnit: cost, updatedAt: serverTimestamp() }, { merge: true });
+      toast("Item updated.", "ok");
+    } else {
+      const openingStock = parseFloat(document.getElementById("it-stock").value) || 0;
+      const ref = await addDoc(collection(db, "items"), {
+        name, category, unit, reorderLevel, currentStock: openingStock,
+        active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+      await setDoc(doc(db, "itemCosts", ref.id), { costPerUnit: cost, updatedAt: serverTimestamp() });
+      toast("Item added.", "ok");
+    }
+    closeModal();
+  } catch (err) {
+    toast("Couldn't save the item. Check your connection.", "err");
+  }
+}
+
+async function deactivateItem(id) {
+  const item = itemsById[id];
+  if (!item) return;
+  if (!confirm(`Remove "${item.name}" from the active items list? Past movements stay in the ledger.`)) return;
+  try {
+    await updateDoc(doc(db, "items", id), { active: false, updatedAt: serverTimestamp() });
+    toast("Item removed.", "ok");
+  } catch (err) {
+    toast("Couldn't remove the item. Check your connection.", "err");
+  }
+}
+
+/* ======================= LEDGER (admin) ======================= */
+let ledgerCache = [];
+async function loadLedger() {
+  const body = document.getElementById("ledger-body");
+  if (!body) return;
+  try {
+    const snap = await getDocs(query(collection(db, "movements"), orderBy("createdAt", "desc"), limit(300)));
+    ledgerCache = snap.docs.map((d) => d.data());
+    renderLedgerRows(ledgerCache);
+  } catch (err) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">Couldn't load the ledger — check your connection.</td></tr>`;
+  }
+}
+function renderLedgerRows(rows) {
+  const body = document.getElementById("ledger-body");
+  if (!body) return;
+  body.innerHTML = rows.length ? rows.map((m) => `<tr>
+    <td>${esc(m.itemName)}</td>
+    <td>${m.type === "in" ? '<span class="badge badge-in">IN</span>' : '<span class="badge badge-out">OUT</span>'}</td>
+    <td class="num">${fmtNum(m.qty)} ${esc(m.unit || "")}</td>
+    <td class="muted">${esc(m.project || "—")}</td>
+    <td class="muted">${esc(m.issuedTo || m.receivedFrom || "—")}</td>
+    <td class="muted">${esc(m.createdByName || "—")}</td>
+    <td class="faint">${fmtDate(m.createdAt)}</td>
+  </tr>`).join("") : `<tr class="empty-row"><td colspan="7">No movements match.</td></tr>`;
+}
+function renderLedger() {
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <input type="text" class="search-input" id="ledger-search" placeholder="Search item, project or person…">
+        <span class="faint">Last 300 movements</span>
+      </div>
+      <table>
+        <thead><tr><th>Item</th><th>Type</th><th class="num">Qty</th><th>Project</th><th>Party</th><th>By</th><th>When</th></tr></thead>
+        <tbody id="ledger-body"><tr class="empty-row"><td colspan="7">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  `;
+}
+document.addEventListener("input", (e) => {
+  if (e.target && e.target.id === "ledger-search") {
+    const q = e.target.value.toLowerCase();
+    renderLedgerRows(ledgerCache.filter((m) =>
+      (m.itemName || "").toLowerCase().includes(q) ||
+      (m.project || "").toLowerCase().includes(q) ||
+      (m.issuedTo || m.receivedFrom || "").toLowerCase().includes(q) ||
+      (m.createdByName || "").toLowerCase().includes(q)
+    ));
+  }
+});
+function exportLedgerCsv() {
+  if (!ledgerCache.length) { toast("Nothing to export yet.", "err"); return; }
+  const header = ["Item","Type","Qty","Unit","Project","Party","By","When"];
+  const rows = ledgerCache.map((m) => [
+    m.itemName, m.type, m.qty, m.unit || "", m.project || "", m.issuedTo || m.receivedFrom || "",
+    m.createdByName || "", m.createdAt && m.createdAt.toDate ? m.createdAt.toDate().toISOString() : ""
+  ]);
+  const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `stockpro-ledger-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+/* ======================= REPORTS (admin) ======================= */
+async function loadReports() {
+  const body = document.getElementById("report-body");
+  if (!body) return;
+  try {
+    const snap = await getDocs(query(collection(db, "movements"), where("type", "==", "out"), orderBy("createdAt", "desc"), limit(500)));
+    const byProject = {};
+    snap.docs.forEach((d) => {
+      const m = d.data();
+      const key = m.project || "No project";
+      if (!byProject[key]) byProject[key] = { qtyValue:0, count:0, items:{} };
+      const cost = costsCache[m.itemId] || 0;
+      byProject[key].qtyValue += (m.qty || 0) * cost;
+      byProject[key].count += 1;
+      byProject[key].items[m.itemName] = (byProject[key].items[m.itemName] || 0) + (m.qty || 0);
+    });
+    const keys = Object.keys(byProject).sort((a,b) => byProject[b].qtyValue - byProject[a].qtyValue);
+    body.innerHTML = keys.length ? keys.map((k) => {
+      const p = byProject[k];
+      const itemsList = Object.entries(p.items).sort((a,b)=>b[1]-a[1]).slice(0,5)
+        .map(([n,q]) => `${esc(n)} (${fmtNum(q)})`).join(", ");
+      return `<tr>
+        <td>${esc(k)}</td>
+        <td class="num">${p.count}</td>
+        <td class="num">${INR.format(p.qtyValue)}</td>
+        <td class="muted">${itemsList}</td>
+      </tr>`;
+    }).join("") : `<tr class="empty-row"><td colspan="4">No issued stock logged yet.</td></tr>`;
+  } catch (err) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="4">Couldn't load report — check your connection.</td></tr>`;
+  }
+}
+function renderReports() {
+  return `
+    <div class="panel">
+      <div class="panel-head"><h3>Consumption by project</h3><span class="faint">Based on current cost/unit — not historical price</span></div>
+      <table>
+        <thead><tr><th>Project</th><th class="num">Issues logged</th><th class="num">Value issued</th><th>Top items</th></tr></thead>
+        <tbody id="report-body"><tr class="empty-row"><td colspan="4">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ======================= USERS (admin) ======================= */
+function renderUsers() {
+  const rows = usersCache.map((u) => `<tr>
+    <td>${esc(u.name || "—")}</td>
+    <td class="muted">${esc(u.email)}</td>
+    <td><span class="badge badge-role">${esc(u.role)}</span></td>
+  </tr>`).join("");
+  return `
+    <div class="panel">
+      <table>
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+        <tbody>${rows || `<tr class="empty-row"><td colspan="3">Loading…</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+function userModalHtml() {
+  return `
+    <h3>Add manager</h3>
+    <form id="user-form">
+      <div class="field"><label for="us-name">Name</label><input type="text" id="us-name" required></div>
+      <div class="field"><label for="us-email">Email</label><input type="email" id="us-email" required></div>
+      <div class="field"><label for="us-pass">Temporary password</label><input type="password" id="us-pass" minlength="6" required></div>
+      <div class="faint" style="margin-bottom:10px;">They can sign in with this email/password. Cost and ₹ data stay hidden from this role.</div>
+      <div class="modal-actions">
+        <button type="button" class="btn" data-action="close-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add manager</button>
+      </div>
+    </form>
+  `;
+}
+async function handleUserSubmit(form) {
+  const name = document.getElementById("us-name").value.trim();
+  const email = document.getElementById("us-email").value.trim();
+  const pass = document.getElementById("us-pass").value;
+  if (!name || !email || pass.length < 6) { toast("Fill all fields — password needs 6+ characters.", "err"); return; }
+  const btn = form.querySelector("button[type=submit]");
+  btn.disabled = true; btn.textContent = "Adding…";
+  let secondaryApp;
+  try {
+    secondaryApp = initializeApp(firebaseConfig, "Secondary-" + Date.now());
+    const secondaryAuth = getAuth(secondaryApp);
+    const cred = await createUserWithEmailAndPassword(secondaryAuth, email, pass);
+    const newUid = cred.user.uid;
+    await signOut(secondaryAuth);
+    await setDoc(doc(db, "users", newUid), { name, email, role: "manager", createdAt: serverTimestamp() });
+    toast("Manager account created.", "ok");
+    closeModal();
+  } catch (err) {
+    const c = err && err.code || "";
+    toast(c.includes("email-already-in-use") ? "That email is already registered." : "Couldn't create the account.", "err");
+  } finally {
+    if (secondaryApp) { try { await deleteApp(secondaryApp); } catch (e) {} }
+    btn.disabled = false; btn.textContent = "Add manager";
+  }
+}
+
+/* ======================= MODAL ======================= */
+function openModal(html) {
+  document.getElementById("modal-body").innerHTML = html;
+  document.getElementById("modal-backdrop").classList.add("active");
+}
+function closeModal() {
+  document.getElementById("modal-backdrop").classList.remove("active");
+  document.getElementById("modal-body").innerHTML = "";
+}
+document.getElementById("modal-backdrop").addEventListener("click", (e) => {
+  if (e.target.id === "modal-backdrop") closeModal();
+});
+
+/* ======================= SIDEBAR (mobile) ======================= */
+function openSidebar() { document.getElementById("sidebar").classList.add("open"); document.getElementById("overlay").classList.add("active"); }
+function closeSidebar() { document.getElementById("sidebar").classList.remove("open"); document.getElementById("overlay").classList.remove("active"); }
+
+/* ======================= THEME ======================= */
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  document.getElementById("theme-toggle-label").textContent = t === "dark" ? "Light mode" : "Dark mode";
+  localStorage.setItem("stockpro-theme", t);
+}
+applyTheme(localStorage.getItem("stockpro-theme") || "dark");
+
+/* ======================= WHAT'S NEW ======================= */
+function maybeShowWhatsNew() {
+  const seen = localStorage.getItem("stockpro-seen-version");
+  if (seen === APP_VERSION) return;
+  const latest = CHANGELOG[0];
+  openModal(`
+    <h3>What's new in v${latest.version}</h3>
+    <ul style="margin:0 0 4px;padding-left:18px;color:var(--text-dim);font-size:13.5px;line-height:1.7;">
+      ${latest.notes.map((n) => `<li>${esc(n)}</li>`).join("")}
+    </ul>
+    <div class="modal-actions"><button class="btn btn-primary" data-action="close-modal">Got it</button></div>
+  `);
+  localStorage.setItem("stockpro-seen-version", APP_VERSION);
+}
+
+/* ======================= INSTALL PROMPT ======================= */
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById("install-btn").style.display = "flex";
+});
+window.addEventListener("appinstalled", () => {
+  document.getElementById("install-btn").style.display = "none";
+});
+
+/* ======================= DELEGATED EVENTS ======================= */
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-action]");
+  if (!t) return;
+  const action = t.dataset.action;
+  if (action === "nav") { location.hash = "#/" + t.dataset.route; }
+  else if (action === "logout") { signOut(auth); }
+  else if (action === "toggle-theme") { applyTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); }
+  else if (action === "install-app") {
+    if (deferredInstallPrompt) { deferredInstallPrompt.prompt(); deferredInstallPrompt = null; document.getElementById("install-btn").style.display = "none"; }
+  }
+  else if (action === "open-sidebar") { openSidebar(); }
+  else if (action === "close-sidebar") { closeSidebar(); }
+  else if (action === "close-modal") { closeModal(); }
+  else if (action === "open-item-modal") { openModal(itemModalHtml(null)); }
+  else if (action === "edit-item") { openModal(itemModalHtml(itemsById[t.dataset.id])); }
+  else if (action === "deactivate-item") { deactivateItem(t.dataset.id); }
+  else if (action === "open-user-modal") { openModal(userModalHtml()); }
+  else if (action === "export-ledger") { exportLedgerCsv(); }
+});
+
+document.addEventListener("submit", (e) => {
+  if (e.target && e.target.id === "move-form") { e.preventDefault(); handleMoveSubmit(e.target); }
+  else if (e.target && e.target.id === "item-form") { e.preventDefault(); handleItemSubmit(e.target); }
+  else if (e.target && e.target.id === "user-form") { e.preventDefault(); handleUserSubmit(e.target); }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeModal();
+});
+
+/* ======================= SERVICE WORKER ======================= */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+
+/* ======================= OFFLINE BANNER ======================= */
+window.addEventListener("offline", () => toast("You're offline — changes will sync when you reconnect.", "err"));
+window.addEventListener("online", () => toast("Back online — syncing.", "ok"));
+</script>
+</body>
+</html>
