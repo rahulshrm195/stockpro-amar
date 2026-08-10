@@ -251,8 +251,13 @@ import {
 import { read as xlsxRead, utils as xlsxUtils, writeFileXLSX } from "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 
 /* ======================= CONFIG ======================= */
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const CHANGELOG = [
+  { version: "1.2.0", date: "2026-08-10", notes: [
+    "New: Category templates — define custom fields (Size, Gauge, Color…) per category",
+    "New: Purchase units — buy/issue in Box, Packet, Loose etc. with automatic conversion",
+    "Items and Receive/Issue now show item specs and convert between purchase units automatically"
+  ]},
   { version: "1.1.0", date: "2026-08-10", notes: [
     "Bulk import items from Excel or CSV — download a template, fill it in, upload it back",
     "Existing item names are detected and skipped automatically"
@@ -299,9 +304,12 @@ const db = initializeFirestore(app, {
 let currentUser = null;
 let currentRole = null;   // 'admin' | 'manager'
 let currentName = "";
-let itemsCache = [];      // [{id,name,category,unit,currentStock,reorderLevel,active}]
+let itemsCache = [];      // [{id,name,category,unit,currentStock,reorderLevel,active,categoryTemplateId,customFields,purchaseUnits}]
 let itemsById = {};
-let costsCache = {};      // itemId -> costPerUnit (admin only)
+let costsCache = {};      // itemId -> {costPerUnit, unitCosts} (admin only)
+let templatesCache = [];  // [{id,name,baseUnit,fields,purchaseUnitPresets}]
+let templatesById = {};
+let templateDraft = null; // working draft while editing a category template
 let projectsCache = [];   // [name,...]
 let usersCache = [];      // admin only
 let liveUnsubs = [];
@@ -316,12 +324,29 @@ const fmtDate = (ts) => {
          d.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit" });
 };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const costOf = (itemId) => (costsCache[itemId] && costsCache[itemId].costPerUnit) || 0;
+const unitCostsOf = (itemId) => (costsCache[itemId] && costsCache[itemId].unitCosts) || {};
+function itemSpecLine(item) {
+  const tpl = item.categoryTemplateId ? templatesById[item.categoryTemplateId] : null;
+  if (!tpl || !item.customFields) return "";
+  const parts = (tpl.fields || [])
+    .map((f) => item.customFields[f.key])
+    .filter((v) => v !== undefined && v !== null && v !== "");
+  return parts.join(" · ");
+}
+function moveQtyText(m) {
+  if (m.enteredUnit && m.enteredUnit !== m.unit) {
+    return `${fmtNum(m.enteredQty)} ${esc(m.enteredUnit)} <span class="faint">(${fmtNum(m.qty)} ${esc(m.unit || "")})</span>`;
+  }
+  return `${fmtNum(m.qty)} ${esc(m.unit || "")}`;
+}
 
 const NAV_ITEMS = [
   { id:"dashboard", label:"Dashboard", roles:["admin","manager"], icon:'<path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>' },
   { id:"receive",   label:"Receive",   roles:["admin","manager"], icon:'<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>' },
   { id:"issue",     label:"Issue",     roles:["admin","manager"], icon:'<path d="M12 21V9m0 0l-4 4m4-4l4 4M4 7V5a2 2 0 012-2h12a2 2 0 012 2v2"/>' },
   { id:"items",     label:"Items",     roles:["admin"], icon:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>' },
+  { id:"categories", label:"Categories", roles:["admin"], icon:'<path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 14v6M14 17h6"/>' },
   { id:"ledger",    label:"Ledger",    roles:["admin"], icon:'<path d="M4 6h16M4 12h16M4 18h10"/>' },
   { id:"reports",   label:"Reports",   roles:["admin"], icon:'<path d="M3 3v18h18M8 17V10M13 17V6M18 17v-4"/>' },
   { id:"users",     label:"Users",     roles:["admin"], icon:'<path d="M17 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/>' }
@@ -447,11 +472,18 @@ function attachLiveListeners() {
     projectsCache = snap.docs.map((d) => d.data().name);
   }));
 
+  const templQ = query(collection(db, "categoryTemplates"), orderBy("name"));
+  liveUnsubs.push(onSnapshot(templQ, (snap) => {
+    templatesCache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    templatesById = Object.fromEntries(templatesCache.map((t) => [t.id, t]));
+    if (location.hash === "#/categories") route();
+  }));
+
   if (currentRole === "admin") {
     const costQ = collection(db, "itemCosts");
     liveUnsubs.push(onSnapshot(costQ, (snap) => {
       costsCache = {};
-      snap.docs.forEach((d) => { costsCache[d.id] = d.data().costPerUnit || 0; });
+      snap.docs.forEach((d) => { costsCache[d.id] = { costPerUnit: d.data().costPerUnit || 0, unitCosts: d.data().unitCosts || {} }; });
       route();
     }));
     const usersQ = collection(db, "users");
@@ -463,7 +495,7 @@ function attachLiveListeners() {
 }
 
 /* ======================= ROUTER ======================= */
-const ADMIN_ONLY_ROUTES = ["items","ledger","reports","users"];
+const ADMIN_ONLY_ROUTES = ["items","categories","ledger","reports","users"];
 window.addEventListener("hashchange", route);
 
 function route() {
@@ -476,7 +508,7 @@ function route() {
   document.querySelectorAll(".nav-item[data-route]").forEach((el) => {
     el.classList.toggle("active", el.dataset.route === r);
   });
-  const titles = { dashboard:"Dashboard", receive:"Receive stock", issue:"Issue stock", items:"Items", ledger:"Ledger", reports:"Reports", users:"Users" };
+  const titles = { dashboard:"Dashboard", receive:"Receive stock", issue:"Issue stock", items:"Items", categories:"Categories", ledger:"Ledger", reports:"Reports", users:"Users" };
   document.getElementById("view-title").textContent = titles[r] || "Dashboard";
   document.getElementById("topbar-actions").innerHTML = topbarActionsFor(r);
   const view = document.getElementById("view");
@@ -485,6 +517,7 @@ function route() {
     case "receive": view.innerHTML = renderMoveForm("in"); break;
     case "issue": view.innerHTML = renderMoveForm("out"); break;
     case "items": view.innerHTML = renderItems(); break;
+    case "categories": view.innerHTML = renderCategories(); break;
     case "ledger": view.innerHTML = renderLedger(); break;
     case "reports": view.innerHTML = renderReports(); break;
     case "users": view.innerHTML = renderUsers(); break;
@@ -498,6 +531,7 @@ function route() {
 
 function topbarActionsFor(r) {
   if (r === "items") return `<button class="btn btn-sm" data-action="open-import-modal">Import</button><button class="btn btn-primary btn-sm" data-action="open-item-modal">+ Add item</button>`;
+  if (r === "categories") return `<button class="btn btn-primary btn-sm" data-action="open-template-modal">+ Add category</button>`;
   if (r === "users" && currentRole === "admin") return `<button class="btn btn-primary btn-sm" data-action="open-user-modal">+ Add manager</button>`;
   if (r === "ledger") return `<button class="btn btn-sm" data-action="export-ledger">Export CSV</button>`;
   return "";
@@ -513,7 +547,7 @@ function renderDashboard() {
   const totalItems = itemsCache.length;
   let valueCard = "";
   if (currentRole === "admin") {
-    const totalValue = itemsCache.reduce((s, i) => s + (i.currentStock || 0) * (costsCache[i.id] || 0), 0);
+    const totalValue = itemsCache.reduce((s, i) => s + (i.currentStock || 0) * costOf(i.id), 0);
     valueCard = `<div class="stat-card"><div class="label">Inventory value</div><div class="value brass">${INR.format(totalValue)}</div></div>`;
   }
   return `
@@ -574,7 +608,7 @@ function movementRow(m) {
   return `<tr>
     <td>${esc(m.itemName)}</td>
     <td>${badge}</td>
-    <td class="num">${fmtNum(m.qty)} ${esc(m.unit || "")}</td>
+    <td class="num">${moveQtyText(m)}</td>
     <td class="muted">${esc(m.project || "—")}${who}</td>
     <td class="faint">${fmtDate(m.createdAt)}</td>
   </tr>`;
@@ -591,13 +625,19 @@ function renderMoveForm(type) {
           <label for="mv-item">Item</label>
           <select id="mv-item" required>
             <option value="">Select an item…</option>
-            ${activeItems.map((i) => `<option value="${i.id}" data-unit="${esc(i.unit || "")}" data-stock="${i.currentStock || 0}">${esc(i.name)} (${fmtNum(i.currentStock)} ${esc(i.unit || "")} in stock)</option>`).join("")}
+            ${activeItems.map((i) => `<option value="${i.id}">${esc(i.name)} (${fmtNum(i.currentStock)} ${esc(i.unit || "")} in stock)</option>`).join("")}
           </select>
+          <div id="mv-item-spec" class="faint" style="margin-top:6px;"></div>
           ${activeItems.length === 0 ? `<div class="faint" style="margin-top:6px;">No items yet.${currentRole === "admin" ? ' Add one under "Items" first.' : " Ask the admin to add items first."}</div>` : ""}
+        </div>
+        <div class="field" id="mv-unit-field" style="display:none;">
+          <label for="mv-unit">${isIn ? "Receiving in" : "Issuing in"}</label>
+          <select id="mv-unit"></select>
         </div>
         <div class="field">
           <label for="mv-qty">Quantity <span id="mv-unit-label" class="faint"></span></label>
           <input type="number" id="mv-qty" min="0.01" step="0.01" required>
+          <div id="mv-qty-convert" class="faint" style="margin-top:6px;"></div>
         </div>
         <div class="field">
           <label for="mv-party">${isIn ? "Received from (optional)" : "Issued to (optional)"}</label>
@@ -612,7 +652,7 @@ function renderMoveForm(type) {
           <label for="mv-note">Note (optional)</label>
           <textarea id="mv-note" rows="2"></textarea>
         </div>
-        <button type="submit" class="btn ${isIn ? "btn-primary" : "btn-primary"} btn-block" id="mv-submit">
+        <button type="submit" class="btn btn-primary btn-block" id="mv-submit">
           ${isIn ? "Log receive" : "Log issue"}
         </button>
       </form>
@@ -620,14 +660,69 @@ function renderMoveForm(type) {
   `;
 }
 
+function updateMoveUnitUI() {
+  const itemSel = document.getElementById("mv-item");
+  if (!itemSel) return;
+  const item = itemsById[itemSel.value];
+  const specEl = document.getElementById("mv-item-spec");
+  const unitFieldWrap = document.getElementById("mv-unit-field");
+  const unitSel = document.getElementById("mv-unit");
+  const unitLabel = document.getElementById("mv-unit-label");
+  if (!item) {
+    if (specEl) specEl.textContent = "";
+    if (unitFieldWrap) unitFieldWrap.style.display = "none";
+    if (unitLabel) unitLabel.textContent = "";
+    return;
+  }
+  if (specEl) specEl.textContent = itemSpecLine(item);
+  const pu = item.purchaseUnits || [];
+  if (pu.length) {
+    unitFieldWrap.style.display = "";
+    unitSel.innerHTML = pu.map((p, idx) => `<option value="${idx}">${esc(p.label)}</option>`).join("");
+    unitLabel.textContent = "";
+  } else {
+    unitFieldWrap.style.display = "none";
+    unitLabel.textContent = item.unit ? `(${item.unit})` : "";
+  }
+  updateMoveConvertHint();
+}
+
+function updateMoveConvertHint() {
+  const convertEl = document.getElementById("mv-qty-convert");
+  if (!convertEl) return;
+  const itemSel = document.getElementById("mv-item");
+  const item = itemSel ? itemsById[itemSel.value] : null;
+  const pu = item ? (item.purchaseUnits || []) : [];
+  if (!item || !pu.length) { convertEl.textContent = ""; return; }
+  const unitSel = document.getElementById("mv-unit");
+  const selected = pu[parseInt(unitSel.value, 10)];
+  const qty = parseFloat(document.getElementById("mv-qty").value);
+  if (!selected || !qty) { convertEl.textContent = ""; return; }
+  convertEl.textContent = `= ${fmtNum(qty * selected.factor)} ${item.unit}`;
+}
+
 document.addEventListener("change", (e) => {
   if (e.target && e.target.id === "mv-item") {
-    const opt = e.target.selectedOptions[0];
-    const unit = opt ? opt.dataset.unit : "";
-    const label = document.getElementById("mv-unit-label");
-    if (label) label.textContent = unit ? `(${unit})` : "";
+    updateMoveUnitUI();
+  } else if (e.target && e.target.id === "mv-unit") {
+    updateMoveConvertHint();
   } else if (e.target && e.target.id === "import-file") {
     handleImportFileChange(e.target);
+  } else if (e.target && e.target.id === "it-template") {
+    const templateId = e.target.value;
+    const formEl = document.getElementById("item-form");
+    const idAttr = formEl ? formEl.dataset.id : "";
+    const existingItem = idAttr ? (itemsById[idAttr] || {}) : {};
+    document.getElementById("item-template-fields").innerHTML = itemTemplateFieldsHtml(templateId, existingItem);
+  } else if (e.target && e.target.matches && e.target.matches('[data-tp="factorMode"]')) {
+    syncTemplateDraftFromDom();
+    openModal(categoryTemplateModalHtml());
+  }
+});
+
+document.addEventListener("input", (e) => {
+  if (e.target && e.target.id === "mv-qty") {
+    updateMoveConvertHint();
   }
 });
 
@@ -635,18 +730,28 @@ async function handleMoveSubmit(form) {
   const type = form.dataset.type;
   const itemSel = document.getElementById("mv-item");
   const itemId = itemSel.value;
-  const qty = parseFloat(document.getElementById("mv-qty").value);
+  const enteredQty = parseFloat(document.getElementById("mv-qty").value);
   const party = document.getElementById("mv-party").value.trim();
   const project = document.getElementById("mv-project").value.trim();
   const note = document.getElementById("mv-note").value.trim();
-  if (!itemId || !qty || qty <= 0) { toast("Choose an item and a valid quantity.", "err"); return; }
+  if (!itemId || !enteredQty || enteredQty <= 0) { toast("Choose an item and a valid quantity.", "err"); return; }
   const item = itemsById[itemId];
   if (!item) { toast("That item couldn't be found — refresh and try again.", "err"); return; }
 
+  const pu = item.purchaseUnits || [];
+  let baseQty = enteredQty;
+  let enteredUnitLabel = item.unit || "";
+  if (pu.length) {
+    const selected = pu[parseInt(document.getElementById("mv-unit").value, 10)];
+    if (!selected) { toast("Choose a unit.", "err"); return; }
+    baseQty = enteredQty * selected.factor;
+    enteredUnitLabel = selected.label;
+  }
+
   if (type === "out") {
     const known = item.currentStock || 0;
-    if (qty > known) {
-      const ok = confirm(`Only ${fmtNum(known)} ${item.unit || ""} of ${item.name} is on record. Issue ${fmtNum(qty)} anyway?`);
+    if (baseQty > known) {
+      const ok = confirm(`Only ${fmtNum(known)} ${item.unit || ""} of ${item.name} is on record. Issue ${fmtNum(baseQty)} ${item.unit || ""} anyway?`);
       if (!ok) return;
     }
   }
@@ -657,7 +762,8 @@ async function handleMoveSubmit(form) {
     const batch = writeBatch(db);
     const mvRef = doc(collection(db, "movements"));
     batch.set(mvRef, {
-      itemId, itemName: item.name, type, qty, unit: item.unit || "",
+      itemId, itemName: item.name, type, qty: baseQty, unit: item.unit || "",
+      enteredQty, enteredUnit: enteredUnitLabel,
       project: project || null,
       issuedTo: type === "out" ? (party || null) : null,
       receivedFrom: type === "in" ? (party || null) : null,
@@ -666,7 +772,7 @@ async function handleMoveSubmit(form) {
       createdAt: serverTimestamp()
     });
     const itemRef = doc(db, "items", itemId);
-    batch.update(itemRef, { currentStock: increment(type === "in" ? qty : -qty), updatedAt: serverTimestamp() });
+    batch.update(itemRef, { currentStock: increment(type === "in" ? baseQty : -baseQty), updatedAt: serverTimestamp() });
     if (project) {
       const projRef = doc(db, "projects", slugify(project));
       batch.set(projRef, { name: project }, { merge: true });
@@ -674,10 +780,11 @@ async function handleMoveSubmit(form) {
     await batch.commit();
     toast(type === "in" ? "Stock received and logged." : "Stock issued and logged.", "ok");
     form.reset();
-    document.getElementById("mv-unit-label").textContent = "";
+    updateMoveUnitUI();
   } catch (err) {
     toast(navigator.onLine ? "Couldn't save — please try again." : "Saved offline — will sync once you're back online.", navigator.onLine ? "err" : "ok");
     form.reset();
+    updateMoveUnitUI();
   } finally {
     btn.disabled = false; btn.textContent = type === "in" ? "Log receive" : "Log issue";
   }
@@ -690,12 +797,13 @@ function slugify(s) {
 /* ======================= ITEMS (admin) ======================= */
 function renderItems() {
   const rows = itemsCache.map((i) => {
-    const cost = costsCache[i.id] || 0;
+    const cost = costOf(i.id);
     const value = (i.currentStock || 0) * cost;
     const low = (i.currentStock || 0) <= (i.reorderLevel || 0);
     const pct = i.reorderLevel > 0 ? Math.min(100, ((i.currentStock || 0) / (i.reorderLevel * 2 || 1)) * 100) : 100;
+    const spec = itemSpecLine(i);
     return `<tr>
-      <td>${esc(i.name)}${low ? ' <span class="badge badge-low">low</span>' : ""}</td>
+      <td>${esc(i.name)}${low ? ' <span class="badge badge-low">low</span>' : ""}${spec ? `<div class="faint">${esc(spec)}</div>` : ""}</td>
       <td class="muted">${esc(i.category || "—")}</td>
       <td class="num">${fmtNum(i.currentStock)} ${esc(i.unit || "")}<span class="stockbar ${low ? "low" : ""}"><i style="width:${pct}%"></i></span></td>
       <td class="num muted">${fmtNum(i.reorderLevel)} ${esc(i.unit || "")}</td>
@@ -717,18 +825,75 @@ function renderItems() {
   `;
 }
 
+function suggestionsDatalistHtml(listId, suggestions) {
+  const opts = suggestions.map((s) => `<option value="${esc(s)}">`).join("");
+  return `<datalist id="${listId}">${opts}</datalist>`;
+}
+
+function itemTemplateFieldsHtml(templateId, existingItem) {
+  const e = existingItem || {};
+  if (!templateId) {
+    return `
+      <div class="field"><label for="it-category">Category</label><input type="text" id="it-category" list="cat-list" value="${esc(e.category || "")}"><datalist id="cat-list">${CATEGORY_SUGGESTIONS.map((c) => `<option value="${c}">`).join("")}</datalist></div>
+      <div class="field"><label for="it-unit">Unit</label><input type="text" id="it-unit" list="unit-list" value="${esc(e.unit || "")}" placeholder="kg, pieces, box…" required><datalist id="unit-list">${UNIT_SUGGESTIONS.map((u) => `<option value="${u}">`).join("")}</datalist></div>
+    `;
+  }
+  const tpl = templatesById[templateId];
+  if (!tpl) return "";
+  const customFields = e.customFields || {};
+  const fieldsHtml = (tpl.fields || []).map((f) => {
+    const val = customFields[f.key] ?? "";
+    const hasSuggestions = f.suggestions && f.suggestions.length;
+    const listAttr = hasSuggestions ? `list="cf-${f.key}-list"` : "";
+    const datalistHtml = hasSuggestions ? suggestionsDatalistHtml(`cf-${f.key}-list`, f.suggestions) : "";
+    return `<div class="field">
+      <label for="cf-${f.key}">${esc(f.label)}${f.required ? " *" : ""}</label>
+      <input type="${f.type === "number" ? "number" : "text"}" id="cf-${f.key}" data-field-key="${f.key}" ${listAttr} value="${esc(val)}" ${f.required ? "required" : ""} ${f.type === "number" ? 'step="any"' : ""}>
+      ${datalistHtml}
+    </div>`;
+  }).join("");
+  const existingUC = e.id ? unitCostsOf(e.id) : {};
+  const existingPU = e.purchaseUnits || [];
+  const puPresets = tpl.purchaseUnitPresets || [];
+  const puHtml = puPresets.map((p) => {
+    const match = existingPU.find((x) => x.key === p.key);
+    const currentCost = existingUC[p.key] ?? "";
+    const currentFactor = match ? match.factor : "";
+    return `<div class="field">
+      <label>${esc(p.label)}${p.factorMode === "fixed" ? ` (= ${fmtNum(p.fixedFactor)} ${esc(tpl.baseUnit)})` : ""}</label>
+      <div style="display:flex; gap:8px;">
+        ${p.factorMode === "perItem" ? `<input type="number" min="0" step="any" placeholder="${esc(tpl.baseUnit)} per ${esc(p.label)}" data-pu-factor="${p.key}" value="${currentFactor}" style="flex:1;">` : ""}
+        <input type="number" min="0" step="0.01" placeholder="₹ per ${esc(p.label)} (blank = not sold this way)" data-pu-cost="${p.key}" value="${currentCost}" style="flex:1;">
+      </div>
+    </div>`;
+  }).join("");
+  return `
+    <input type="hidden" id="it-unit" value="${esc(tpl.baseUnit)}">
+    <div class="field"><label>Category</label><input type="text" id="it-category" value="${esc(tpl.name)}" disabled></div>
+    ${fieldsHtml}
+    ${puPresets.length ? `<div class="faint" style="margin:14px 0 8px;">How this item is bought (leave a price blank if it's not sold that way)</div>${puHtml}` : ""}
+  `;
+}
+
 function itemModalHtml(existing) {
   const e = existing || {};
-  const cost = existing ? (costsCache[existing.id] || 0) : "";
+  const cost = existing ? costOf(existing.id) : "";
+  const currentTemplateId = e.categoryTemplateId || "";
   return `
     <h3>${existing ? "Edit item" : "Add item"}</h3>
     <form id="item-form" data-id="${existing ? existing.id : ""}">
       <div class="field"><label for="it-name">Name</label><input type="text" id="it-name" value="${esc(e.name || "")}" required></div>
-      <div class="field"><label for="it-category">Category</label><input type="text" id="it-category" list="cat-list" value="${esc(e.category || "")}"><datalist id="cat-list">${CATEGORY_SUGGESTIONS.map((c) => `<option value="${c}">`).join("")}</datalist></div>
-      <div class="field"><label for="it-unit">Unit</label><input type="text" id="it-unit" list="unit-list" value="${esc(e.unit || "")}" placeholder="kg, pieces, box…" required><datalist id="unit-list">${UNIT_SUGGESTIONS.map((u) => `<option value="${u}">`).join("")}</datalist></div>
-      <div class="field"><label for="it-reorder">Reorder level</label><input type="number" id="it-reorder" min="0" step="0.01" value="${e.reorderLevel ?? 0}"></div>
-      <div class="field"><label for="it-cost">Cost per unit (₹)</label><input type="number" id="it-cost" min="0" step="0.01" value="${cost}"></div>
-      ${!existing ? `<div class="field"><label for="it-stock">Opening stock</label><input type="number" id="it-stock" min="0" step="0.01" value="0"></div>` : ""}
+      <div class="field">
+        <label for="it-template">Category template</label>
+        <select id="it-template">
+          <option value="">No template (free-form)</option>
+          ${templatesCache.map((tpl) => `<option value="${tpl.id}" ${currentTemplateId === tpl.id ? "selected" : ""}>${esc(tpl.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div id="item-template-fields">${itemTemplateFieldsHtml(currentTemplateId, e)}</div>
+      <div class="field"><label for="it-reorder">Reorder level (base unit)</label><input type="number" id="it-reorder" min="0" step="0.01" value="${e.reorderLevel ?? 0}"></div>
+      <div class="field"><label for="it-cost">Cost per unit (₹, base unit)</label><input type="number" id="it-cost" min="0" step="0.01" value="${cost}"></div>
+      ${!existing ? `<div class="field"><label for="it-stock">Opening stock (base unit)</label><input type="number" id="it-stock" min="0" step="0.01" value="0"></div>` : ""}
       <div class="modal-actions">
         <button type="button" class="btn" data-action="close-modal">Cancel</button>
         <button type="submit" class="btn btn-primary">${existing ? "Save changes" : "Add item"}</button>
@@ -740,23 +905,58 @@ function itemModalHtml(existing) {
 async function handleItemSubmit(form) {
   const id = form.dataset.id;
   const name = document.getElementById("it-name").value.trim();
+  const templateId = document.getElementById("it-template").value;
   const category = document.getElementById("it-category").value.trim();
   const unit = document.getElementById("it-unit").value.trim();
   const reorderLevel = parseFloat(document.getElementById("it-reorder").value) || 0;
   const cost = parseFloat(document.getElementById("it-cost").value) || 0;
   if (!name || !unit) { toast("Item name and unit are required.", "err"); return; }
+
+  let customFields = null;
+  const purchaseUnits = [];
+  const unitCosts = {};
+  if (templateId) {
+    const tpl = templatesById[templateId];
+    if (!tpl) { toast("That category couldn't be found — refresh and try again.", "err"); return; }
+    customFields = {};
+    for (const f of (tpl.fields || [])) {
+      const el = document.getElementById("cf-" + f.key);
+      const val = el ? el.value.trim() : "";
+      if (f.required && !val) { toast(`"${f.label}" is required for this category.`, "err"); return; }
+      if (val !== "") customFields[f.key] = f.type === "number" ? (parseFloat(val) || 0) : val;
+    }
+    for (const p of (tpl.purchaseUnitPresets || [])) {
+      const costEl = document.querySelector('[data-pu-cost="' + p.key + '"]');
+      const costVal = costEl ? parseFloat(costEl.value) : NaN;
+      if (!costVal || costVal <= 0) continue;
+      let factor = p.fixedFactor;
+      if (p.factorMode === "perItem") {
+        const factorEl = document.querySelector('[data-pu-factor="' + p.key + '"]');
+        factor = factorEl ? parseFloat(factorEl.value) : NaN;
+        if (!factor || factor <= 0) { toast(`Enter how many ${tpl.baseUnit} per ${p.label}.`, "err"); return; }
+      }
+      purchaseUnits.push({ key: p.key, label: p.label, factor });
+      unitCosts[p.key] = costVal;
+    }
+  }
+
   try {
+    const itemPayload = {
+      name, category, unit, reorderLevel,
+      categoryTemplateId: templateId || null,
+      customFields, purchaseUnits,
+      updatedAt: serverTimestamp()
+    };
     if (id) {
-      await updateDoc(doc(db, "items", id), { name, category, unit, reorderLevel, updatedAt: serverTimestamp() });
-      await setDoc(doc(db, "itemCosts", id), { costPerUnit: cost, updatedAt: serverTimestamp() }, { merge: true });
+      await updateDoc(doc(db, "items", id), itemPayload);
+      await setDoc(doc(db, "itemCosts", id), { costPerUnit: cost, unitCosts, updatedAt: serverTimestamp() }, { merge: true });
       toast("Item updated.", "ok");
     } else {
       const openingStock = parseFloat(document.getElementById("it-stock").value) || 0;
       const ref = await addDoc(collection(db, "items"), {
-        name, category, unit, reorderLevel, currentStock: openingStock,
-        active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+        ...itemPayload, currentStock: openingStock, active: true, createdAt: serverTimestamp()
       });
-      await setDoc(doc(db, "itemCosts", ref.id), { costPerUnit: cost, updatedAt: serverTimestamp() });
+      await setDoc(doc(db, "itemCosts", ref.id), { costPerUnit: cost, unitCosts, updatedAt: serverTimestamp() });
       toast("Item added.", "ok");
     }
     closeModal();
@@ -774,6 +974,218 @@ async function deactivateItem(id) {
     toast("Item removed.", "ok");
   } catch (err) {
     toast("Couldn't remove the item. Check your connection.", "err");
+  }
+}
+
+/* ======================= CATEGORIES (admin) ======================= */
+function renderCategories() {
+  const rows = templatesCache.map((tpl) => {
+    const usageCount = itemsCache.filter((i) => i.categoryTemplateId === tpl.id).length;
+    return `<tr>
+      <td>${esc(tpl.name)}</td>
+      <td class="muted">${esc(tpl.baseUnit)}</td>
+      <td class="num">${(tpl.fields || []).length}</td>
+      <td class="num">${(tpl.purchaseUnitPresets || []).length}</td>
+      <td class="muted">${usageCount} item${usageCount === 1 ? "" : "s"}</td>
+      <td>
+        <button class="btn btn-sm btn-ghost" data-action="edit-template" data-id="${tpl.id}">Edit</button>
+        <button class="btn btn-sm btn-danger" data-action="delete-template" data-id="${tpl.id}">Delete</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `
+    <div class="panel">
+      <p class="faint" style="margin-top:0;">Categories define which fields show up when adding an item, and how it can be bought (e.g. by the box, or loose).</p>
+      <table>
+        <thead><tr><th>Category</th><th>Base unit</th><th class="num">Fields</th><th class="num">Purchase units</th><th>Used by</th><th></th></tr></thead>
+        <tbody>${rows || `<tr class="empty-row"><td colspan="6">No categories yet — add your first one (e.g. Screws, Nails).</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function blankTemplateField() { return { label: "", type: "text", required: false, suggestions: [] }; }
+function blankTemplatePreset() { return { label: "", factorMode: "fixed", fixedFactor: 1 }; }
+
+function syncTemplateDraftFromDom() {
+  if (!templateDraft) return;
+  const nameEl = document.getElementById("tf-name");
+  const baseUnitEl = document.getElementById("tf-baseunit");
+  if (nameEl) templateDraft.name = nameEl.value;
+  if (baseUnitEl) templateDraft.baseUnit = baseUnitEl.value;
+  document.querySelectorAll("[data-field-row]").forEach((row) => {
+    const idx = parseInt(row.dataset.fieldRow, 10);
+    const f = templateDraft.fields[idx];
+    if (!f) return;
+    f.label = row.querySelector('[data-tf="label"]').value;
+    f.type = row.querySelector('[data-tf="type"]').value;
+    f.required = row.querySelector('[data-tf="required"]').checked;
+    f.suggestions = row.querySelector('[data-tf="suggestions"]').value.split(",").map((s) => s.trim()).filter(Boolean);
+  });
+  document.querySelectorAll("[data-pu-row]").forEach((row) => {
+    const idx = parseInt(row.dataset.puRow, 10);
+    const p = templateDraft.purchaseUnitPresets[idx];
+    if (!p) return;
+    p.label = row.querySelector('[data-tp="label"]').value;
+    p.factorMode = row.querySelector('[data-tp="factorMode"]').value;
+    const fixedEl = row.querySelector('[data-tp="fixedFactor"]');
+    p.fixedFactor = fixedEl ? (parseFloat(fixedEl.value) || 0) : 0;
+  });
+}
+
+function templatePresetFactorFieldHtml(t, p) {
+  if (p.factorMode !== "fixed") {
+    return `<div class="faint" style="margin-top:6px;">You'll enter this conversion separately for each item (e.g. pieces per box can vary).</div>`;
+  }
+  return `
+        <div class="field" style="margin-top:8px;margin-bottom:0;">
+          <label>= how many ${esc(t.baseUnit || "base units")} per ${esc(p.label || "unit")}?</label>
+          <input type="number" min="0" step="any" data-tp="fixedFactor" value="${p.fixedFactor ?? ""}">
+        </div>
+  `;
+}
+
+function templatePuRowHtml(t, p, idx) {
+  return `
+    <div class="panel" style="padding:12px;margin-bottom:8px;" data-pu-row="${idx}">
+      <div style="display:flex; gap:8px; align-items:flex-end;">
+        <div class="field" style="flex:2;margin-bottom:0;">
+          <label>Purchase unit label</label>
+          <input type="text" data-tp="label" value="${esc(p.label)}" placeholder="e.g. Box, Packet (1kg), Loose">
+        </div>
+        <div class="field" style="flex:1;margin-bottom:0;">
+          <label>Conversion</label>
+          <select data-tp="factorMode">
+            <option value="fixed" ${p.factorMode === "fixed" ? "selected" : ""}>Fixed</option>
+            <option value="perItem" ${p.factorMode === "perItem" ? "selected" : ""}>Varies per item</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" data-action="remove-template-pu" data-idx="${idx}">✕</button>
+      </div>
+      ${templatePresetFactorFieldHtml(t, p)}
+    </div>
+  `;
+}
+
+function categoryTemplateModalHtml() {
+  const t = templateDraft;
+  const fieldsHtml = t.fields.map((f, idx) => `
+    <div class="panel" style="padding:12px;margin-bottom:8px;" data-field-row="${idx}">
+      <div style="display:flex; gap:8px; align-items:flex-end;">
+        <div class="field" style="flex:2;margin-bottom:0;">
+          <label>Field label</label>
+          <input type="text" data-tf="label" value="${esc(f.label)}" placeholder="e.g. Size (mm)">
+        </div>
+        <div class="field" style="flex:1;margin-bottom:0;">
+          <label>Type</label>
+          <select data-tf="type">
+            <option value="text" ${f.type === "text" ? "selected" : ""}>Text</option>
+            <option value="number" ${f.type === "number" ? "selected" : ""}>Number</option>
+          </select>
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" data-action="remove-template-field" data-idx="${idx}">✕</button>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+        <label style="display:flex; align-items:center; gap:6px; margin:0; font-size:12.5px; color:var(--text-dim); white-space:nowrap;">
+          <input type="checkbox" data-tf="required" ${f.required ? "checked" : ""} style="width:auto;"> Required
+        </label>
+        <input type="text" data-tf="suggestions" value="${esc((f.suggestions || []).join(", "))}" placeholder="Suggestions, comma-separated (optional)" style="flex:1;">
+      </div>
+    </div>
+  `).join("");
+
+  const puHtml = t.purchaseUnitPresets.map((p, idx) => templatePuRowHtml(t, p, idx)).join("");
+
+  return `
+    <h3>${t.id ? "Edit category" : "Add category"}</h3>
+    <div class="field"><label for="tf-name">Category name</label><input type="text" id="tf-name" value="${esc(t.name)}" placeholder="e.g. Screws"></div>
+    <div class="field"><label for="tf-baseunit">Base unit (what stock is tracked in)</label><input type="text" id="tf-baseunit" list="unit-list" value="${esc(t.baseUnit)}" placeholder="e.g. pieces, kg"><datalist id="unit-list">${UNIT_SUGGESTIONS.map((u) => `<option value="${u}">`).join("")}</datalist></div>
+
+    <div style="margin-top:18px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+      <label style="margin:0;">Fields (shown when adding an item in this category)</label>
+      <button type="button" class="btn btn-sm" data-action="add-template-field">+ Add field</button>
+    </div>
+    ${fieldsHtml || `<p class="faint">No fields yet.</p>`}
+
+    <div style="margin-top:18px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;">
+      <label style="margin:0;">Purchase units (how it can be bought)</label>
+      <button type="button" class="btn btn-sm" data-action="add-template-pu">+ Add purchase unit</button>
+    </div>
+    ${puHtml || `<p class="faint">No purchase units yet — items will just use the base unit.</p>`}
+
+    <div class="modal-actions">
+      <button type="button" class="btn" data-action="close-modal">Cancel</button>
+      <button type="button" class="btn btn-primary" data-action="save-template">${t.id ? "Save changes" : "Add category"}</button>
+    </div>
+  `;
+}
+
+function addTemplateField() {
+  syncTemplateDraftFromDom();
+  templateDraft.fields.push(blankTemplateField());
+  openModal(categoryTemplateModalHtml());
+}
+function removeTemplateField(idx) {
+  syncTemplateDraftFromDom();
+  templateDraft.fields.splice(idx, 1);
+  openModal(categoryTemplateModalHtml());
+}
+function addTemplatePU() {
+  syncTemplateDraftFromDom();
+  templateDraft.purchaseUnitPresets.push(blankTemplatePreset());
+  openModal(categoryTemplateModalHtml());
+}
+function removeTemplatePU(idx) {
+  syncTemplateDraftFromDom();
+  templateDraft.purchaseUnitPresets.splice(idx, 1);
+  openModal(categoryTemplateModalHtml());
+}
+
+async function saveTemplate() {
+  syncTemplateDraftFromDom();
+  const t = templateDraft;
+  const name = (t.name || "").trim();
+  const baseUnit = (t.baseUnit || "").trim();
+  if (!name || !baseUnit) { toast("Category name and base unit are required.", "err"); return; }
+  const fields = t.fields.map((f) => ({
+    key: slugify(f.label || ""),
+    label: (f.label || "").trim(),
+    type: f.type === "number" ? "number" : "text",
+    required: !!f.required,
+    suggestions: f.suggestions || []
+  })).filter((f) => f.key && f.label);
+  const presets = t.purchaseUnitPresets.map((p) => ({
+    key: slugify(p.label || ""),
+    label: (p.label || "").trim(),
+    factorMode: p.factorMode === "perItem" ? "perItem" : "fixed",
+    fixedFactor: p.factorMode === "fixed" ? (parseFloat(p.fixedFactor) || 0) : null
+  })).filter((p) => p.key && p.label && (p.factorMode === "perItem" || p.fixedFactor > 0));
+  try {
+    if (t.id) {
+      await updateDoc(doc(db, "categoryTemplates", t.id), { name, baseUnit, fields, purchaseUnitPresets: presets, updatedAt: serverTimestamp() });
+      toast("Category updated.", "ok");
+    } else {
+      await addDoc(collection(db, "categoryTemplates"), { name, baseUnit, fields, purchaseUnitPresets: presets, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      toast("Category added.", "ok");
+    }
+    templateDraft = null;
+    closeModal();
+  } catch (err) {
+    toast("Couldn't save the category. Check your connection.", "err");
+  }
+}
+
+async function deleteTemplate(id) {
+  const tpl = templatesById[id];
+  if (!tpl) return;
+  const usageCount = itemsCache.filter((i) => i.categoryTemplateId === id).length;
+  if (usageCount > 0) { toast(`Can't delete — ${usageCount} item(s) still use "${tpl.name}". Move them to another category first.`, "err"); return; }
+  if (!confirm(`Delete the "${tpl.name}" category?`)) return;
+  try {
+    await deleteDoc(doc(db, "categoryTemplates", id));
+    toast("Category deleted.", "ok");
+  } catch (err) {
+    toast("Couldn't delete. Check your connection.", "err");
   }
 }
 
@@ -1000,7 +1412,7 @@ async function loadReports() {
       const m = d.data();
       const key = m.project || "No project";
       if (!byProject[key]) byProject[key] = { qtyValue:0, count:0, items:{} };
-      const cost = costsCache[m.itemId] || 0;
+      const cost = costOf(m.itemId);
       byProject[key].qtyValue += (m.qty || 0) * cost;
       byProject[key].count += 1;
       byProject[key].items[m.itemName] = (byProject[key].items[m.itemName] || 0) + (m.qty || 0);
@@ -1157,6 +1569,28 @@ document.addEventListener("click", (e) => {
   else if (action === "open-item-modal") { openModal(itemModalHtml(null)); }
   else if (action === "edit-item") { openModal(itemModalHtml(itemsById[t.dataset.id])); }
   else if (action === "open-import-modal") { importRows = []; openModal(importModalHtml()); }
+  else if (action === "open-template-modal") {
+    templateDraft = { id: null, name: "", baseUnit: "", fields: [blankTemplateField()], purchaseUnitPresets: [blankTemplatePreset()] };
+    openModal(categoryTemplateModalHtml());
+  }
+  else if (action === "edit-template") {
+    const existingTpl = templatesById[t.dataset.id];
+    if (existingTpl) {
+      templateDraft = JSON.parse(JSON.stringify({
+        id: existingTpl.id, name: existingTpl.name, baseUnit: existingTpl.baseUnit,
+        fields: existingTpl.fields || [], purchaseUnitPresets: existingTpl.purchaseUnitPresets || []
+      }));
+      if (!templateDraft.fields.length) templateDraft.fields.push(blankTemplateField());
+      if (!templateDraft.purchaseUnitPresets.length) templateDraft.purchaseUnitPresets.push(blankTemplatePreset());
+      openModal(categoryTemplateModalHtml());
+    }
+  }
+  else if (action === "delete-template") { deleteTemplate(t.dataset.id); }
+  else if (action === "add-template-field") { addTemplateField(); }
+  else if (action === "remove-template-field") { removeTemplateField(parseInt(t.dataset.idx, 10)); }
+  else if (action === "add-template-pu") { addTemplatePU(); }
+  else if (action === "remove-template-pu") { removeTemplatePU(parseInt(t.dataset.idx, 10)); }
+  else if (action === "save-template") { saveTemplate(); }
   else if (action === "download-import-template") { downloadImportTemplate(); }
   else if (action === "confirm-import") { confirmImport(); }
   else if (action === "deactivate-item") { deactivateItem(t.dataset.id); }
