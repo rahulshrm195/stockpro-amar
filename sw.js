@@ -1,6 +1,6 @@
 // StockPro service worker
 // IMPORTANT: bump CACHE_NAME every time APP_VERSION changes in index.html
-const CACHE_NAME = 'stockpro-cache-v1.0.2';
+const CACHE_NAME = 'stockpro-cache-v1.1.0';
 
 const APP_SHELL = [
   '/',
