@@ -251,8 +251,12 @@ import {
 import { read as xlsxRead, utils as xlsxUtils, writeFileXLSX } from "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 
 /* ======================= CONFIG ======================= */
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const CHANGELOG = [
+  { version: "1.3.0", date: "2026-08-10", notes: [
+    "Bulk import is now category-aware — the template has one tab per category with the exact fields and pricing columns for that category",
+    "No categories yet? The template still falls back to the original generic format"
+  ]},
   { version: "1.2.0", date: "2026-08-10", notes: [
     "New: Category templates — define custom fields (Size, Gauge, Color…) per category",
     "New: Purchase units — buy/issue in Box, Packet, Loose etc. with automatic conversion",
@@ -1192,14 +1196,49 @@ async function deleteTemplate(id) {
 /* ======================= BULK IMPORT (admin) ======================= */
 let importRows = [];
 
+function safeSheetName(name) {
+  return String(name).replace(/[:\\/?*[\]]/g, "").slice(0, 31) || "Items";
+}
+
+// Single source of truth for column layout, used by BOTH the template
+// generator and the parser, so they can never drift out of sync.
+function buildTemplateColumns(tpl) {
+  const cols = [{ type: "name", header: "Name" }];
+  (tpl.fields || []).forEach((f) => {
+    cols.push({ type: "field", key: f.key, header: f.label, fieldType: f.type, required: f.required, example: (f.suggestions && f.suggestions[0]) || "" });
+  });
+  cols.push({ type: "reorder", header: "Reorder Level" });
+  cols.push({ type: "stock", header: "Opening Stock" });
+  cols.push({ type: "cost", header: "Cost per unit (₹)" });
+  (tpl.purchaseUnitPresets || []).forEach((p) => {
+    if (p.factorMode === "perItem") {
+      cols.push({ type: "pu-factor", key: p.key, header: `${p.label} — qty per unit` });
+    }
+    cols.push({ type: "pu-cost", key: p.key, header: `${p.label} — price (₹)` });
+  });
+  return cols;
+}
+
 function downloadImportTemplate() {
   const wb = xlsxUtils.book_new();
-  const ws = xlsxUtils.json_to_sheet([
-    { Name: "Drywall Screw 19mm 6G Nickel", Category: "Screws", Unit: "pieces", "Reorder Level": 100, "Cost per unit": 2.5, "Opening Stock": 800 },
-    { Name: "Nails 1 inch", Category: "Nails", Unit: "kg", "Reorder Level": 1, "Cost per unit": 180, "Opening Stock": 2.5 }
-  ]);
-  ws["!cols"] = [{ wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
-  xlsxUtils.book_append_sheet(wb, ws, "Items");
+  if (!templatesCache.length) {
+    const ws = xlsxUtils.json_to_sheet([
+      { Name: "Drywall Screw 19mm 6G Nickel", Category: "Screws", Unit: "pieces", "Reorder Level": 100, "Cost per unit": 2.5, "Opening Stock": 800 },
+      { Name: "Nails 1 inch", Category: "Nails", Unit: "kg", "Reorder Level": 1, "Cost per unit": 180, "Opening Stock": 2.5 }
+    ]);
+    ws["!cols"] = [{ wch: 30 }, { wch: 14 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 14 }];
+    xlsxUtils.book_append_sheet(wb, ws, "Items");
+    writeFileXLSX(wb, "stockpro-items-template.xlsx");
+    return;
+  }
+  templatesCache.forEach((tpl) => {
+    const columns = buildTemplateColumns(tpl);
+    const exampleRow = {};
+    columns.forEach((c) => { exampleRow[c.header] = c.example ?? ""; });
+    const ws = xlsxUtils.json_to_sheet([exampleRow]);
+    ws["!cols"] = columns.map(() => ({ wch: 20 }));
+    xlsxUtils.book_append_sheet(wb, ws, safeSheetName(tpl.name));
+  });
   writeFileXLSX(wb, "stockpro-items-template.xlsx");
 }
 
@@ -1208,10 +1247,12 @@ const IMPORT_FIELD_ALIASES = {
   category: ["category"],
   unit: ["unit"],
   reorderLevel: ["reorder level", "reorder", "reorder at"],
-  cost: ["cost per unit", "cost", "cost/unit"],
+  cost: ["cost per unit", "cost", "cost/unit", "cost per unit (₹)"],
   openingStock: ["opening stock", "stock", "current stock", "qty"]
 };
 
+// Legacy flat parser — used for any sheet whose name doesn't match a
+// category template (keeps the original generic template working).
 function normalizeImportRows(rawRows) {
   const existingNames = new Set(itemsCache.map((i) => (i.name || "").trim().toLowerCase()));
   return rawRows.map((raw) => {
@@ -1230,14 +1271,71 @@ function normalizeImportRows(rawRows) {
     const openingStock = parseFloat(norm.openingStock) || 0;
     const isDup = !!name && existingNames.has(name.toLowerCase());
     const valid = !!name && !!unit;
-    return { name, category, unit, reorderLevel, cost, openingStock, valid, isDup };
+    return {
+      name, category, unit, reorderLevel, cost, openingStock, valid, isDup,
+      categoryTemplateId: null, customFields: null, purchaseUnits: [], unitCosts: {}
+    };
   }).filter((r) => r.name || r.unit || r.category);
 }
 
+// Template-aware parser — used when a sheet's name matches a category.
+function parseTemplateSheetRows(tpl, rawRows) {
+  const existingNames = new Set(itemsCache.map((i) => (i.name || "").trim().toLowerCase()));
+  const columns = buildTemplateColumns(tpl);
+  return rawRows.map((raw) => {
+    const byHeader = {};
+    Object.keys(raw).forEach((k) => { byHeader[String(k).trim().toLowerCase()] = raw[k]; });
+    const get = (header) => {
+      const v = byHeader[String(header).trim().toLowerCase()];
+      return v === undefined || v === null ? "" : v;
+    };
+    const name = String(get("Name")).trim();
+    const reorderLevel = parseFloat(get("Reorder Level")) || 0;
+    const openingStock = parseFloat(get("Opening Stock")) || 0;
+    const cost = parseFloat(get("Cost per unit (₹)")) || 0;
+    const customFields = {};
+    let missingRequired = false;
+    columns.filter((c) => c.type === "field").forEach((c) => {
+      const val = String(get(c.header)).trim();
+      if (c.required && !val) missingRequired = true;
+      if (val !== "") customFields[c.key] = c.fieldType === "number" ? (parseFloat(val) || 0) : val;
+    });
+    const purchaseUnits = [];
+    const unitCosts = {};
+    (tpl.purchaseUnitPresets || []).forEach((p) => {
+      const costVal = parseFloat(get(`${p.label} — price (₹)`));
+      if (!costVal || costVal <= 0) return;
+      let factor = p.fixedFactor;
+      if (p.factorMode === "perItem") {
+        factor = parseFloat(get(`${p.label} — qty per unit`));
+        if (!factor || factor <= 0) return;
+      }
+      purchaseUnits.push({ key: p.key, label: p.label, factor });
+      unitCosts[p.key] = costVal;
+    });
+    const isDup = !!name && existingNames.has(name.toLowerCase());
+    const valid = !!name && !missingRequired;
+    return {
+      name, category: tpl.name, unit: tpl.baseUnit, reorderLevel, cost, openingStock,
+      categoryTemplateId: tpl.id, customFields, purchaseUnits, unitCosts,
+      valid, isDup
+    };
+  }).filter((r) => r.name);
+}
+
+function parseSheetRows(sheetName, rawRows) {
+  const tpl = templatesCache.find((t) => t.name.trim().toLowerCase() === String(sheetName).trim().toLowerCase());
+  return tpl ? parseTemplateSheetRows(tpl, rawRows) : normalizeImportRows(rawRows);
+}
+
 function importModalHtml() {
+  const hasTemplates = templatesCache.length > 0;
   return `
     <h3>Import items</h3>
-    <p class="faint" style="margin-top:-10px;">Download the template, fill it in Excel, then upload it here. Existing item names are skipped automatically.</p>
+    <p class="faint" style="margin-top:-10px;">${hasTemplates
+      ? "Download the template — one tab per category, with the right fields and pricing columns for each. Fill it in, upload it back."
+      : "Download the template, fill it in Excel, then upload it here. Add category templates first for a tailored, per-category workbook."}
+      Existing item names are skipped automatically.</p>
     <button type="button" class="btn btn-block" style="margin-bottom:14px;" data-action="download-import-template">Download template (.xlsx)</button>
     <div class="field">
       <label for="import-file">Upload filled file (.xlsx or .csv)</label>
@@ -1260,9 +1358,12 @@ async function handleImportFileChange(input) {
   try {
     const buf = await file.arrayBuffer();
     const wb = xlsxRead(buf, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const rawRows = xlsxUtils.sheet_to_json(ws, { defval: "" });
-    importRows = normalizeImportRows(rawRows);
+    importRows = [];
+    wb.SheetNames.forEach((sheetName) => {
+      const ws = wb.Sheets[sheetName];
+      const rawRows = xlsxUtils.sheet_to_json(ws, { defval: "" });
+      if (rawRows.length) importRows = importRows.concat(parseSheetRows(sheetName, rawRows));
+    });
     renderImportPreview();
   } catch (err) {
     preview.innerHTML = `<p class="faint">Couldn't read that file — make sure it's a valid Excel or CSV file.</p>`;
@@ -1284,7 +1385,7 @@ function renderImportPreview() {
   const rowsHtml = importRows.slice(0, 50).map((r) => {
     let status = `<span class="badge badge-in">Ready</span>`;
     if (r.isDup) status = `<span class="badge badge-role">Skip — exists</span>`;
-    else if (!r.valid) status = `<span class="badge badge-low">Missing name/unit</span>`;
+    else if (!r.valid) status = `<span class="badge badge-low">Missing info</span>`;
     return `<tr><td>${esc(r.name || "—")}</td><td class="muted">${esc(r.category || "—")}</td><td class="muted">${esc(r.unit || "—")}</td><td>${status}</td></tr>`;
   }).join("");
   preview.innerHTML = `
@@ -1316,9 +1417,12 @@ async function confirmImport() {
         batch.set(itemRef, {
           name: r.name, category: r.category, unit: r.unit, reorderLevel: r.reorderLevel,
           currentStock: r.openingStock, active: true,
+          categoryTemplateId: r.categoryTemplateId || null,
+          customFields: r.customFields || null,
+          purchaseUnits: r.purchaseUnits || [],
           createdAt: serverTimestamp(), updatedAt: serverTimestamp()
         });
-        batch.set(doc(db, "itemCosts", itemRef.id), { costPerUnit: r.cost, updatedAt: serverTimestamp() });
+        batch.set(doc(db, "itemCosts", itemRef.id), { costPerUnit: r.cost, unitCosts: r.unitCosts || {}, updatedAt: serverTimestamp() });
       });
       await batch.commit();
       imported += chunk.length;
