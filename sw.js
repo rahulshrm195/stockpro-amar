@@ -1,14 +1,14 @@
 // StockPro service worker
 // IMPORTANT: bump CACHE_NAME every time APP_VERSION changes in index.html
-const CACHE_NAME = 'stockpro-cache-v1.0.0';
+const CACHE_NAME = 'stockpro-cache-v1.0.1';
 
 const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
-  '/icons/icon-maskable-512.png'
+  '/icon-192.png',
+  '/icon-512.png',
+  '/icon-maskable-512.png'
 ];
 
 // Hosts we never want the service worker to intercept — Firestore/Auth need
