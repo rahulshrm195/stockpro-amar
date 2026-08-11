@@ -251,8 +251,12 @@ import {
 import { read as xlsxRead, utils as xlsxUtils, writeFileXLSX } from "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs";
 
 /* ======================= CONFIG ======================= */
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const CHANGELOG = [
+  { version: "1.4.0", date: "2026-08-10", notes: [
+    "New field type: 'Number + Unit' — a value box plus a unit box (e.g. 19 / mm), with a default unit so it doesn't need retyping",
+    "Excel template and import now generate/read a separate column for that unit, matching how you'd fill it in by hand"
+  ]},
   { version: "1.3.0", date: "2026-08-10", notes: [
     "Bulk import is now category-aware — the template has one tab per category with the exact fields and pricing columns for that category",
     "No categories yet? The template still falls back to the original generic format"
@@ -334,7 +338,15 @@ function itemSpecLine(item) {
   const tpl = item.categoryTemplateId ? templatesById[item.categoryTemplateId] : null;
   if (!tpl || !item.customFields) return "";
   const parts = (tpl.fields || [])
-    .map((f) => item.customFields[f.key])
+    .map((f) => {
+      if (f.type === "value_unit") {
+        const val = item.customFields[f.key];
+        const unit = item.customFields[f.key + "_unit"];
+        if (val === undefined || val === null || val === "") return null;
+        return unit ? `${val}${f.valueType === "number" ? "" : " "}${unit}` : String(val);
+      }
+      return item.customFields[f.key];
+    })
     .filter((v) => v !== undefined && v !== null && v !== "");
   return parts.join(" · ");
 }
@@ -721,6 +733,9 @@ document.addEventListener("change", (e) => {
   } else if (e.target && e.target.matches && e.target.matches('[data-tp="factorMode"]')) {
     syncTemplateDraftFromDom();
     openModal(categoryTemplateModalHtml());
+  } else if (e.target && e.target.matches && e.target.matches('[data-tf="type"]')) {
+    syncTemplateDraftFromDom();
+    openModal(categoryTemplateModalHtml());
   }
 });
 
@@ -834,6 +849,29 @@ function suggestionsDatalistHtml(listId, suggestions) {
   return `<datalist id="${listId}">${opts}</datalist>`;
 }
 
+function templateFieldRowHtml(f, customFields) {
+  if (f.type === "value_unit") {
+    const val = customFields[f.key] ?? "";
+    const unit = customFields[f.key + "_unit"] ?? f.defaultUnit ?? "";
+    return `<div class="field">
+      <label for="cf-${f.key}">${esc(f.label)}${f.required ? " *" : ""}</label>
+      <div style="display:flex; gap:8px;">
+        <input type="${f.valueType === "number" ? "number" : "text"}" id="cf-${f.key}" data-field-key="${f.key}" value="${esc(val)}" ${f.required ? "required" : ""} ${f.valueType === "number" ? 'step="any"' : ""} style="flex:2;">
+        <input type="text" id="cf-${f.key}-unit" data-field-unit-key="${f.key}" value="${esc(unit)}" style="flex:1;">
+      </div>
+    </div>`;
+  }
+  const val = customFields[f.key] ?? "";
+  const hasSuggestions = f.suggestions && f.suggestions.length;
+  const listAttr = hasSuggestions ? `list="cf-${f.key}-list"` : "";
+  const datalistHtml = hasSuggestions ? suggestionsDatalistHtml(`cf-${f.key}-list`, f.suggestions) : "";
+  return `<div class="field">
+      <label for="cf-${f.key}">${esc(f.label)}${f.required ? " *" : ""}</label>
+      <input type="${f.type === "number" ? "number" : "text"}" id="cf-${f.key}" data-field-key="${f.key}" ${listAttr} value="${esc(val)}" ${f.required ? "required" : ""} ${f.type === "number" ? 'step="any"' : ""}>
+      ${datalistHtml}
+    </div>`;
+}
+
 function itemTemplateFieldsHtml(templateId, existingItem) {
   const e = existingItem || {};
   if (!templateId) {
@@ -845,17 +883,7 @@ function itemTemplateFieldsHtml(templateId, existingItem) {
   const tpl = templatesById[templateId];
   if (!tpl) return "";
   const customFields = e.customFields || {};
-  const fieldsHtml = (tpl.fields || []).map((f) => {
-    const val = customFields[f.key] ?? "";
-    const hasSuggestions = f.suggestions && f.suggestions.length;
-    const listAttr = hasSuggestions ? `list="cf-${f.key}-list"` : "";
-    const datalistHtml = hasSuggestions ? suggestionsDatalistHtml(`cf-${f.key}-list`, f.suggestions) : "";
-    return `<div class="field">
-      <label for="cf-${f.key}">${esc(f.label)}${f.required ? " *" : ""}</label>
-      <input type="${f.type === "number" ? "number" : "text"}" id="cf-${f.key}" data-field-key="${f.key}" ${listAttr} value="${esc(val)}" ${f.required ? "required" : ""} ${f.type === "number" ? 'step="any"' : ""}>
-      ${datalistHtml}
-    </div>`;
-  }).join("");
+  const fieldsHtml = (tpl.fields || []).map((f) => templateFieldRowHtml(f, customFields)).join("");
   const existingUC = e.id ? unitCostsOf(e.id) : {};
   const existingPU = e.purchaseUnits || [];
   const puPresets = tpl.purchaseUnitPresets || [];
@@ -870,6 +898,7 @@ function itemTemplateFieldsHtml(templateId, existingItem) {
         <input type="number" min="0" step="0.01" placeholder="₹ per ${esc(p.label)} (blank = not sold this way)" data-pu-cost="${p.key}" value="${currentCost}" style="flex:1;">
       </div>
     </div>`;
+
   }).join("");
   return `
     <input type="hidden" id="it-unit" value="${esc(tpl.baseUnit)}">
@@ -927,7 +956,14 @@ async function handleItemSubmit(form) {
       const el = document.getElementById("cf-" + f.key);
       const val = el ? el.value.trim() : "";
       if (f.required && !val) { toast(`"${f.label}" is required for this category.`, "err"); return; }
-      if (val !== "") customFields[f.key] = f.type === "number" ? (parseFloat(val) || 0) : val;
+      if (f.type === "value_unit") {
+        if (val !== "") customFields[f.key] = f.valueType === "number" ? (parseFloat(val) || 0) : val;
+        const unitEl = document.getElementById("cf-" + f.key + "-unit");
+        const unitVal = unitEl ? unitEl.value.trim() : "";
+        if (unitVal !== "") customFields[f.key + "_unit"] = unitVal;
+      } else if (val !== "") {
+        customFields[f.key] = f.type === "number" ? (parseFloat(val) || 0) : val;
+      }
     }
     for (const p of (tpl.purchaseUnitPresets || [])) {
       const costEl = document.querySelector('[data-pu-cost="' + p.key + '"]');
@@ -1008,7 +1044,7 @@ function renderCategories() {
   `;
 }
 
-function blankTemplateField() { return { label: "", type: "text", required: false, suggestions: [] }; }
+function blankTemplateField() { return { label: "", type: "text", required: false, suggestions: [], valueType: "text", defaultUnit: "" }; }
 function blankTemplatePreset() { return { label: "", factorMode: "fixed", fixedFactor: 1 }; }
 
 function syncTemplateDraftFromDom() {
@@ -1025,6 +1061,10 @@ function syncTemplateDraftFromDom() {
     f.type = row.querySelector('[data-tf="type"]').value;
     f.required = row.querySelector('[data-tf="required"]').checked;
     f.suggestions = row.querySelector('[data-tf="suggestions"]').value.split(",").map((s) => s.trim()).filter(Boolean);
+    const valueTypeEl = row.querySelector('[data-tf="valueType"]');
+    if (valueTypeEl) f.valueType = valueTypeEl.value;
+    const defaultUnitEl = row.querySelector('[data-tf="defaultUnit"]');
+    if (defaultUnitEl) f.defaultUnit = defaultUnitEl.value;
   });
   document.querySelectorAll("[data-pu-row]").forEach((row) => {
     const idx = parseInt(row.dataset.puRow, 10);
@@ -1071,24 +1111,44 @@ function templatePuRowHtml(t, p, idx) {
   `;
 }
 
-function categoryTemplateModalHtml() {
-  const t = templateDraft;
-  const fieldsHtml = t.fields.map((f, idx) => `
+function templateFieldValueUnitExtrasHtml(f) {
+  if (f.type !== "value_unit") return "";
+  return `
+    <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+      <div class="field" style="flex:1;margin-bottom:0;">
+        <label>Value type</label>
+        <select data-tf="valueType">
+          <option value="text" ${f.valueType === "text" ? "selected" : ""}>Text</option>
+          <option value="number" ${f.valueType === "number" ? "selected" : ""}>Number</option>
+        </select>
+      </div>
+      <div class="field" style="flex:1;margin-bottom:0;">
+        <label>Default unit</label>
+        <input type="text" data-tf="defaultUnit" value="${esc(f.defaultUnit || "")}" placeholder="e.g. mm, No.">
+      </div>
+    </div>
+  `;
+}
+
+function templateFieldRowBuilderHtml(f, idx) {
+  return `
     <div class="panel" style="padding:12px;margin-bottom:8px;" data-field-row="${idx}">
       <div style="display:flex; gap:8px; align-items:flex-end;">
         <div class="field" style="flex:2;margin-bottom:0;">
           <label>Field label</label>
-          <input type="text" data-tf="label" value="${esc(f.label)}" placeholder="e.g. Size (mm)">
+          <input type="text" data-tf="label" value="${esc(f.label)}" placeholder="e.g. Size, Gauge, Color">
         </div>
         <div class="field" style="flex:1;margin-bottom:0;">
           <label>Type</label>
           <select data-tf="type">
             <option value="text" ${f.type === "text" ? "selected" : ""}>Text</option>
             <option value="number" ${f.type === "number" ? "selected" : ""}>Number</option>
+            <option value="value_unit" ${f.type === "value_unit" ? "selected" : ""}>Number + Unit</option>
           </select>
         </div>
         <button type="button" class="btn btn-sm btn-danger" data-action="remove-template-field" data-idx="${idx}">✕</button>
       </div>
+      ${templateFieldValueUnitExtrasHtml(f)}
       <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
         <label style="display:flex; align-items:center; gap:6px; margin:0; font-size:12.5px; color:var(--text-dim); white-space:nowrap;">
           <input type="checkbox" data-tf="required" ${f.required ? "checked" : ""} style="width:auto;"> Required
@@ -1096,7 +1156,12 @@ function categoryTemplateModalHtml() {
         <input type="text" data-tf="suggestions" value="${esc((f.suggestions || []).join(", "))}" placeholder="Suggestions, comma-separated (optional)" style="flex:1;">
       </div>
     </div>
-  `).join("");
+  `;
+}
+
+function categoryTemplateModalHtml() {
+  const t = templateDraft;
+  const fieldsHtml = t.fields.map((f, idx) => templateFieldRowBuilderHtml(f, idx)).join("");
 
   const puHtml = t.purchaseUnitPresets.map((p, idx) => templatePuRowHtml(t, p, idx)).join("");
 
@@ -1154,9 +1219,11 @@ async function saveTemplate() {
   const fields = t.fields.map((f) => ({
     key: slugify(f.label || ""),
     label: (f.label || "").trim(),
-    type: f.type === "number" ? "number" : "text",
+    type: ["number", "value_unit"].includes(f.type) ? f.type : "text",
     required: !!f.required,
-    suggestions: f.suggestions || []
+    suggestions: f.suggestions || [],
+    valueType: f.type === "value_unit" ? (f.valueType === "number" ? "number" : "text") : null,
+    defaultUnit: f.type === "value_unit" ? (f.defaultUnit || "").trim() : null
   })).filter((f) => f.key && f.label);
   const presets = t.purchaseUnitPresets.map((p) => ({
     key: slugify(p.label || ""),
@@ -1206,6 +1273,9 @@ function buildTemplateColumns(tpl) {
   const cols = [{ type: "name", header: "Name" }];
   (tpl.fields || []).forEach((f) => {
     cols.push({ type: "field", key: f.key, header: f.label, fieldType: f.type, required: f.required, example: (f.suggestions && f.suggestions[0]) || "" });
+    if (f.type === "value_unit") {
+      cols.push({ type: "field-unit", key: f.key, header: `${f.label} Unit`, example: f.defaultUnit || "" });
+    }
   });
   cols.push({ type: "reorder", header: "Reorder Level" });
   cols.push({ type: "stock", header: "Opening Stock" });
@@ -1298,7 +1368,14 @@ function parseTemplateSheetRows(tpl, rawRows) {
     columns.filter((c) => c.type === "field").forEach((c) => {
       const val = String(get(c.header)).trim();
       if (c.required && !val) missingRequired = true;
-      if (val !== "") customFields[c.key] = c.fieldType === "number" ? (parseFloat(val) || 0) : val;
+      if (c.fieldType === "value_unit") {
+        const fieldDef = (tpl.fields || []).find((f) => f.key === c.key) || {};
+        if (val !== "") customFields[c.key] = fieldDef.valueType === "number" ? (parseFloat(val) || 0) : val;
+        const unitVal = String(get(`${c.header} Unit`)).trim() || fieldDef.defaultUnit || "";
+        if (unitVal) customFields[c.key + "_unit"] = unitVal;
+      } else if (val !== "") {
+        customFields[c.key] = c.fieldType === "number" ? (parseFloat(val) || 0) : val;
+      }
     });
     const purchaseUnits = [];
     const unitCosts = {};
